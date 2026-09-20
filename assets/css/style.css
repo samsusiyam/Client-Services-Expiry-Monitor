@@ -695,3 +695,228 @@
     font-size: 14px;
     font-weight: 600;
 }
+
+/* ==========================================================================
+   Mobile & Tablet Responsiveness (@media queries)
+   ========================================================================== */
+
+/* Tablets and below (<= 991px) */
+@media (max-width: 991px) {
+    .csm-stats-row {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .csm-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+
+    .csm-header-actions {
+        width: 100%;
+        justify-content: space-between;
+        flex-wrap: wrap;
+    }
+
+    .csm-filter-panel label.control-label {
+        padding-top: 0;
+        margin-bottom: 5px;
+    }
+}
+
+/* Mobile Devices (<= 768px) */
+@media (max-width: 768px) {
+    .csm-container {
+        padding: 10px 0;
+    }
+
+    .csm-header {
+        padding: 14px 16px;
+        border-radius: 10px;
+    }
+
+    .csm-title {
+        font-size: 18px;
+        flex-wrap: wrap;
+    }
+
+    .csm-subtitle {
+        font-size: 12px;
+    }
+
+    .csm-header-actions {
+        flex-direction: column;
+        gap: 10px;
+        align-items: stretch;
+    }
+
+    .csm-auto-refresh {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .csm-auto-refresh select {
+        flex-grow: 1;
+        max-width: 180px;
+    }
+
+    #csmBtnManualRefresh {
+        width: 100%;
+        height: 38px;
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    /* 2-Column Grid for Metrics on Phone */
+    .csm-stats-row {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        margin-bottom: 16px;
+    }
+
+    .csm-stat-card {
+        padding: 12px 14px;
+        border-radius: 10px;
+    }
+
+    .csm-stat-icon {
+        width: 38px;
+        height: 38px;
+        font-size: 16px;
+        margin-right: 10px;
+        border-radius: 8px;
+    }
+
+    .csm-stat-count {
+        font-size: 20px;
+    }
+
+    .csm-stat-label {
+        font-size: 10px;
+    }
+
+    /* Filters Stack Vertically */
+    .csm-filter-panel {
+        border-radius: 10px;
+        margin-bottom: 16px;
+    }
+
+    .csm-filter-panel .panel-body {
+        padding: 15px;
+    }
+
+    .csm-filter-panel .form-control {
+        height: 40px;
+        font-size: 14px;
+    }
+
+    .csm-filter-buttons {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 10px;
+        padding-top: 12px;
+    }
+
+    .csm-filter-buttons .btn {
+        width: 100%;
+        margin: 0;
+        height: 42px;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+    }
+
+    /* Table Meta & Controls */
+    .csm-table-meta {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .csm-meta-controls {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    /* Table Responsive Horizontal Scrolling */
+    .csm-table-wrapper {
+        border-radius: 10px;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .csm-table th, .csm-table td {
+        padding: 10px 10px;
+    }
+
+    /* Touch-friendly Phone & Contact Buttons */
+    .csm-phone-badge {
+        font-size: 11px;
+        padding: 4px 6px;
+    }
+
+    .csm-contact-actions {
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+
+    .csm-btn-wa, .csm-btn-dial, .csm-btn-copy-num {
+        padding: 5px 8px;
+        font-size: 11px;
+        border-radius: 6px;
+        min-height: 28px;
+    }
+
+    /* Pagination on Mobile */
+    .csm-pagination-bottom-wrapper {
+        justify-content: center;
+        margin-top: 14px;
+    }
+
+    .csm-pagination-list > li > a,
+    .csm-pagination-list > li > span {
+        padding: 6px 10px;
+        font-size: 12px;
+    }
+}
+
+/* Extra Small Phones (<= 480px) */
+@media (max-width: 480px) {
+    .csm-title {
+        font-size: 16px;
+    }
+
+    .csm-live-badge {
+        font-size: 10px;
+        padding: 2px 8px;
+    }
+
+    .csm-stats-row {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .csm-stats-row .csm-stat-card:last-child {
+        grid-column: span 2;
+    }
+
+    .csm-stat-card {
+        padding: 10px 12px;
+    }
+
+    .csm-stat-icon {
+        width: 32px;
+        height: 32px;
+        font-size: 14px;
+        margin-right: 8px;
+    }
+
+    .csm-stat-count {
+        font-size: 18px;
+    }
+
+    .csm-stat-label {
+        font-size: 9px;
+    }
+}
