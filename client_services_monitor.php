@@ -3,8 +3,8 @@
  * WHMCS Addon Module: Client Services & Expiry Monitor
  *
  * @package    WHMCS
- * @author     Developer
- * @copyright  Copyright (c) 2026
+ * @author     Bahari IT
+ * @copyright  Copyright (c) 2026 Bahari IT
  * @version    1.0.0
  */
 
@@ -24,7 +24,7 @@ function client_services_monitor_config()
     return [
         'name' => 'Client Services & Expiry Monitor',
         'description' => 'Live real-time monitoring of client active products, services and domains sorted by next due date with client phone number, one-click WhatsApp and call connect.',
-        'author' => 'WHMCS Custom Modules',
+        'author' => 'Bahari IT',
         'language' => 'english',
         'version' => '1.0.0',
         'logo' => 'logo.png',

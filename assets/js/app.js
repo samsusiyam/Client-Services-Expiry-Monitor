@@ -218,11 +218,11 @@
 
         var msg = '';
         if (template === 'due_reminder') {
-            msg = 'প্রিয় ' + name + ', আপনার ' + product + ' সার্ভিসের রিনিউয়াল/মেয়াদ ' + duedate + ' তারিখে শেষ হতে যাচ্ছে। নিরবচ্ছিন্ন সার্ভিসের জন্য অনুগ্রহ করে রিনিউ করে নিন। ধন্যবাদ।';
+            msg = 'Dear ' + name + ', your service ' + product + ' is scheduled for renewal on ' + duedate + '. Please renew your service to ensure uninterrupted operation. Thank you - Bahari IT';
         } else if (template === 'overdue_notice') {
-            msg = 'প্রিয় ' + name + ', আপনার ' + product + ' সার্ভিসের মেয়াদ ' + duedate + ' তারিখে শেষ হয়ে গেছে এবং বর্তমানে ওভারডিউ রয়েছে। সাময়িক স্থগিত এড়াতে দ্রুত বিল পরিশোধের অনুরোধ করা হচ্ছে।';
+            msg = 'Dear ' + name + ', your service ' + product + ' expired on ' + duedate + ' and is currently overdue. Please pay your pending invoice promptly to avoid suspension. Thank you - Bahari IT';
         } else if (template === 'welcome') {
-            msg = 'প্রিয় ' + name + ', আপনার ' + product + ' সার্ভিসটি সক্রিয় রয়েছে। যেকোনো প্রয়োজনে আমাদের জানাতে পারেন। ধন্যবাদ।';
+            msg = 'Dear ' + name + ', your service ' + product + ' is active and running smoothly. Please feel free to reach out if you need any assistance. Thank you - Bahari IT';
         }
 
         $('#modalMessageText').val(msg);
@@ -279,7 +279,7 @@
             $tbody.html(
                 '<tr><td colspan="11" class="text-center csm-empty-state">' +
                 '<i class="fa-solid fa-folder-open"></i>' +
-                '<p>কোনো সার্ভিস বা রেকর্ড পাওয়া যায়নি (No Records Found)</p>' +
+                '<p>No services or records found matching your filters.</p>' +
                 '</td></tr>'
             );
             return;

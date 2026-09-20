@@ -16,7 +16,7 @@ if (!defined("WHMCS")) {
                 <i class="fa-solid fa-server text-primary"></i> Client Services & Expiry Monitor
                 <span class="csm-live-badge"><span class="csm-pulse-dot"></span> LIVE Realtime</span>
             </h2>
-            <p class="csm-subtitle">সম্পূর্ণ পেজ রিলোড ছাড়া লাইভ ফিল্টারিং, অটো-সর্টিং ও ইনস্ট্যান্ট আপডেট ড্যাশবোর্ড</p>
+            <p class="csm-subtitle">Live real-time filtering, auto-sorting & instant client services expiry monitoring dashboard</p>
         </div>
         <div class="csm-header-actions">
             <div class="csm-auto-refresh">
@@ -296,9 +296,9 @@ if (!defined("WHMCS")) {
                     <label>Message Template:</label>
                     <select id="modalTemplateSelect" class="form-control" onchange="csmApplyWhatsAppTemplate()">
                         <option value="custom">Custom Message</option>
-                        <option value="due_reminder">Renewal Reminder (মেয়াদ শেষ হওয়ার নোটিশ)</option>
-                        <option value="overdue_notice">Service Overdue Notice (বিল বকেয়া নোটিশ)</option>
-                        <option value="welcome">Service Active Confirmation</option>
+                        <option value="due_reminder">Renewal Reminder Notice</option>
+                        <option value="overdue_notice">Service Overdue Notice</option>
+                        <option value="welcome">Active Service Confirmation</option>
                     </select>
                 </div>
                 <div class="form-group">
