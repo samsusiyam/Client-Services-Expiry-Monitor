@@ -289,92 +289,118 @@
         $.each(records, function (index, item) {
             var rowClass = (item.days_left !== null && item.days_left <= 0) ? 'row-overdue' : '';
 
-            // Sub meta string (Server, Username, Dedicated IP)
+            // Sub meta tags (Order, Reg Date, Server, IP, Username)
             var subMeta = '<div class="csm-sub-meta">';
             if (item.orderid) {
-                subMeta += '<span><strong>Order #:</strong> ' + escapeHtml(item.orderid) + '</span>';
+                subMeta += '<span class="csm-meta-tag"><strong>Order:</strong> #' + escapeHtml(item.orderid) + '</span>';
             }
             if (item.regdate && item.regdate !== '-') {
-                subMeta += '<span><strong>Reg Date:</strong> ' + escapeHtml(item.regdate) + '</span>';
+                subMeta += '<span class="csm-meta-tag"><i class="fa-regular fa-calendar"></i> ' + escapeHtml(item.regdate) + '</span>';
             }
             if (item.server_name) {
-                subMeta += '<span><strong>Server:</strong> ' + escapeHtml(item.server_name) + '</span>';
+                subMeta += '<span class="csm-meta-tag"><i class="fa-solid fa-server"></i> ' + escapeHtml(item.server_name) + '</span>';
             }
             if (item.dedicatedip) {
-                subMeta += '<span><strong>IP:</strong> ' + escapeHtml(item.dedicatedip) + '</span>';
+                subMeta += '<span class="csm-meta-tag"><i class="fa-solid fa-network-wired"></i> ' + escapeHtml(item.dedicatedip) + '</span>';
             }
             if (item.username) {
-                subMeta += '<span><strong>User:</strong> ' + escapeHtml(item.username) + '</span>';
+                subMeta += '<span class="csm-meta-tag"><i class="fa-regular fa-user"></i> ' + escapeHtml(item.username) + '</span>';
             }
             subMeta += '</div>';
 
+            // Type pill badge
+            var typeClass = 'type-other';
+            if (item.product_type === 'server') typeClass = 'type-server';
+            else if (item.product_type === 'hostingaccount') typeClass = 'type-hosting';
+            else if (item.product_type === 'reselleraccount') typeClass = 'type-reseller';
+            else if (item.record_type === 'domain') typeClass = 'type-domain';
+            var typePill = '<span class="csm-type-pill ' + typeClass + '">' + escapeHtml(item.type_label) + '</span>';
+
             // Domain link
-            var domainHtml = '-';
+            var domainHtml = '<span class="text-muted">-</span>';
             if (item.domain) {
                 var cleanDom = escapeHtml(item.domain);
-                domainHtml = '<a href="http://' + cleanDom + '" target="_blank" class="csm-domain-link">' + cleanDom + '</a>' +
-                    '<a href="http://www.' + cleanDom + '" target="_blank" class="csm-www-link" title="Open with www">www</a>';
+                domainHtml = '<a href="http://' + cleanDom + '" target="_blank" class="csm-domain-link">' +
+                    '<i class="fa-solid fa-globe text-muted"></i> ' + cleanDom +
+                    '</a>' +
+                    '<a href="http://www.' + cleanDom + '" target="_blank" class="csm-www-btn" title="Open with www">WWW</a>';
             }
 
-            // Contact & WhatsApp button
+            // Contact & WhatsApp button (Clean formatted phone without dots)
             var phoneHtml = '<span class="text-muted">N/A</span>';
             if (item.phonenumber && item.phonenumber !== 'N/A') {
-                var cleanPhone = escapeHtml(item.phonenumber);
+                var cleanDisplayPhone = escapeHtml(item.phonenumber);
                 var waBtn = '';
                 if (item.whatsapp_url) {
-                    waBtn = '<button type="button" class="csm-contact-btn csm-btn-whatsapp csm-btn-wa-modal" ' +
+                    waBtn = '<button type="button" class="csm-btn-wa csm-btn-wa-modal" ' +
                         'data-name="' + escapeHtml(item.client_name) + '" ' +
-                        'data-phone="' + cleanPhone + '" ' +
+                        'data-phone="' + cleanDisplayPhone + '" ' +
                         'data-product="' + escapeHtml(item.product_name) + '" ' +
                         'data-duedate="' + escapeHtml(item.nextduedate) + '" ' +
                         'data-waurl="' + escapeHtml(item.whatsapp_url) + '" title="Chat on WhatsApp">' +
-                        '<i class="fa-brands fa-whatsapp"></i> WA' +
+                        '<i class="fa-brands fa-whatsapp"></i> WhatsApp' +
                         '</button>';
                 }
 
-                var callBtn = '<a href="tel:' + cleanPhone + '" class="csm-contact-btn csm-btn-call" title="Direct Phone Call"><i class="fa-solid fa-phone"></i> Call</a>';
-                var copyBtn = '<button type="button" class="csm-contact-btn csm-btn-copy" data-phone="' + cleanPhone + '" title="Copy Number"><i class="fa-regular fa-copy"></i></button>';
+                var callBtn = item.dial_url ? '<a href="' + escapeHtml(item.dial_url) + '" class="csm-btn-dial" title="Direct Phone Call"><i class="fa-solid fa-phone"></i> Call</a>' : '';
+                var copyBtn = '<button type="button" class="csm-btn-copy-num csm-btn-copy" data-phone="' + cleanDisplayPhone + '" title="Copy Number"><i class="fa-regular fa-copy"></i></button>';
 
                 phoneHtml = '<div class="csm-phone-box">' +
-                    '<span class="csm-phone-text">' + cleanPhone + '</span>' +
+                    '<span class="csm-phone-badge"><i class="fa-solid fa-phone-volume text-primary"></i> ' + cleanDisplayPhone + '</span>' +
                     '<div class="csm-contact-actions">' + waBtn + callBtn + copyBtn + '</div>' +
                     '</div>';
             }
 
             // Price & Payment
             var priceHtml = '<div class="csm-price-box">' + escapeHtml(item.price_formatted) + '</div>' +
-                '<div class="csm-sub-meta"><span>' + escapeHtml(item.paymentmethod) + '</span></div>';
+                '<div class="csm-sub-meta"><span class="csm-meta-tag">' + escapeHtml(item.paymentmethod) + '</span></div>';
 
-            // Due Date & Badge
+            // Due Date & Modern Pill Badge
+            var pillClass = 'pill-normal';
+            var pillIcon = '<i class="fa-regular fa-calendar-check"></i>';
+            if (item.days_left !== null) {
+                if (item.days_left < 0) {
+                    pillClass = 'pill-overdue';
+                    pillIcon = '<i class="fa-solid fa-circle-exclamation"></i>';
+                } else if (item.days_left === 0) {
+                    pillClass = 'pill-today';
+                    pillIcon = '<i class="fa-solid fa-bolt"></i>';
+                } else if (item.days_left <= CSM_WARNING_DAYS) {
+                    pillClass = 'pill-warning';
+                    pillIcon = '<i class="fa-solid fa-hourglass-half"></i>';
+                }
+            }
+
             var dueHtml = '<div class="csm-due-box">' +
-                '<span class="csm-due-date">' + escapeHtml(item.nextduedate) + '</span>' +
-                '<span class="csm-due-badge badge ' + item.due_badge_class + '">' + escapeHtml(item.due_badge_text) + '</span>' +
+                '<span class="csm-due-date"><i class="fa-regular fa-calendar text-muted"></i> ' + escapeHtml(item.nextduedate) + '</span>' +
+                '<span class="csm-pill-badge ' + pillClass + '">' + pillIcon + ' ' + escapeHtml(item.due_badge_text) + '</span>' +
                 '</div>';
 
-            // Status Badge
-            var statusHtml = '<span class="badge badge-status ' + item.status_badge_class + '">' + escapeHtml(item.status) + '</span>';
+            // Status Pill
+            var statusLower = item.status.toLowerCase();
+            var statusClass = 'status-' + statusLower;
+            var statusHtml = '<span class="status-pill ' + statusClass + '">' + escapeHtml(item.status) + '</span>';
 
             // Action Links
-            var actionHtml = '<a href="' + escapeHtml(item.service_url) + '" class="btn btn-default btn-xs" title="Manage Service / Product">' +
-                '<i class="fa-solid fa-arrow-up-right-from-square"></i>' +
+            var actionHtml = '<a href="' + escapeHtml(item.service_url) + '" class="btn btn-default btn-sm" title="Manage Service / Product" target="_blank">' +
+                '<i class="fa-solid fa-arrow-up-right-from-square text-primary"></i>' +
                 '</a>';
 
             rowsHtml += '<tr class="' + rowClass + '">' +
                 '<td class="text-center"><input type="checkbox" class="csm-row-checkbox" value="' + item.id + '"></td>' +
-                '<td><a href="' + escapeHtml(item.service_url) + '" class="csm-item-title font-weight-bold">#' + item.id + '</a></td>' +
+                '<td><a href="' + escapeHtml(item.service_url) + '" class="csm-item-title font-weight-bold" target="_blank">#' + item.id + '</a></td>' +
                 '<td>' +
-                    '<div><a href="' + escapeHtml(item.service_url) + '" class="csm-item-title">' + escapeHtml(item.product_name) + '</a> ' +
-                    '<span class="label label-info">' + escapeHtml(item.type_label) + '</span></div>' +
+                    '<div><a href="' + escapeHtml(item.service_url) + '" class="csm-item-title" target="_blank">' + escapeHtml(item.product_name) + '</a>' + typePill + '</div>' +
                     subMeta +
                 '</td>' +
                 '<td>' + domainHtml + '</td>' +
                 '<td>' +
-                    '<a href="' + escapeHtml(item.client_url) + '" class="csm-client-link">' + escapeHtml(item.client_name) + '</a>' +
+                    '<a href="' + escapeHtml(item.client_url) + '" class="csm-client-link" target="_blank"><i class="fa-regular fa-user text-muted"></i> ' + escapeHtml(item.client_name) + '</a>' +
                     (item.company_name ? '<div class="csm-sub-meta">' + escapeHtml(item.company_name) + '</div>' : '') +
                 '</td>' +
                 '<td>' + phoneHtml + '</td>' +
                 '<td>' + priceHtml + '</td>' +
-                '<td><span class="label label-default">' + escapeHtml(item.billingcycle) + '</span></td>' +
+                '<td><span class="csm-meta-tag font-weight-bold">' + escapeHtml(item.billingcycle) + '</span></td>' +
                 '<td>' + dueHtml + '</td>' +
                 '<td>' + statusHtml + '</td>' +
                 '<td class="text-center">' + actionHtml + '</td>' +

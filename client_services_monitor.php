@@ -403,19 +403,36 @@ function client_services_monitor_fetch_data($params, $vars)
 
         // Format Phone Number & WhatsApp
         $rawPhone = $item->phonenumber;
-        $cleanPhone = preg_replace('/[^0-9]/', '', $rawPhone);
+        $displayPhone = 'N/A';
         $whatsappNumber = '';
+        $dialPhone = '';
 
-        if (!empty($cleanPhone)) {
-            // Bangladesh special logic: if starts with 01X, prepend 88
-            if (strlen($cleanPhone) === 11 && substr($cleanPhone, 0, 1) === '0') {
-                $whatsappNumber = '88' . $cleanPhone;
-            } elseif (strlen($cleanPhone) === 10 && substr($cleanPhone, 0, 1) === '1') {
-                $whatsappNumber = '880' . $cleanPhone;
-            } elseif (substr($cleanPhone, 0, 2) === '88') {
-                $whatsappNumber = $cleanPhone;
-            } else {
-                $whatsappNumber = $defaultCountryCode . ltrim($cleanPhone, '0');
+        if (!empty($rawPhone) && $rawPhone !== '0' && $rawPhone !== '-') {
+            // Remove WHMCS default dot (.) e.g. +880.1317-878503 -> +880 1317-878503
+            $displayPhone = trim(str_replace('.', ' ', $rawPhone));
+            $displayPhone = preg_replace('/\s+/', ' ', $displayPhone);
+
+            // Clean only digits for WhatsApp and Dial links
+            $cleanDigits = preg_replace('/[^0-9]/', '', $rawPhone);
+
+            if (!empty($cleanDigits)) {
+                // Bangladesh number normalization for WhatsApp
+                if (strlen($cleanDigits) === 11 && substr($cleanDigits, 0, 2) === '01') {
+                    $whatsappNumber = '88' . $cleanDigits;
+                    $dialPhone = '+88' . $cleanDigits;
+                } elseif (strlen($cleanDigits) === 10 && substr($cleanDigits, 0, 1) === '1') {
+                    $whatsappNumber = '880' . $cleanDigits;
+                    $dialPhone = '+880' . $cleanDigits;
+                } elseif (substr($cleanDigits, 0, 3) === '880') {
+                    $whatsappNumber = $cleanDigits;
+                    $dialPhone = '+' . $cleanDigits;
+                } elseif (substr($cleanDigits, 0, 2) === '88') {
+                    $whatsappNumber = $cleanDigits;
+                    $dialPhone = '+' . $cleanDigits;
+                } else {
+                    $whatsappNumber = $defaultCountryCode . ltrim($cleanDigits, '0');
+                    $dialPhone = '+' . $whatsappNumber;
+                }
             }
         }
 
@@ -464,8 +481,9 @@ function client_services_monitor_fetch_data($params, $vars)
             'client_name' => trim($item->firstname . ' ' . $item->lastname),
             'company_name' => $item->companyname ?: '',
             'email' => $item->email,
-            'phonenumber' => $rawPhone ?: 'N/A',
+            'phonenumber' => $displayPhone,
             'whatsapp_url' => !empty($whatsappNumber) ? "https://wa.me/{$whatsappNumber}" : '',
+            'dial_url' => !empty($dialPhone) ? "tel:{$dialPhone}" : '',
             'price_formatted' => $prefix . number_format((float)$item->price, 2) . $suffix,
             'paymentmethod' => $item->paymentmethod ?: '-',
             'billingcycle' => $item->billingcycle ?: '-',
