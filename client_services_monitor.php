@@ -195,7 +195,7 @@ function client_services_monitor_fetch_data($params, $vars)
                 'tblhosting.domain',
                 'tblhosting.paymentmethod',
                 'tblhosting.firstpaymentamount',
-                'tblhosting.recurringamount as price',
+                'tblhosting.amount as price',
                 'tblhosting.billingcycle',
                 'tblhosting.nextduedate',
                 'tblhosting.domainstatus as status',
