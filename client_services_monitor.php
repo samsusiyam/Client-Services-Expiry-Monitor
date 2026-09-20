@@ -27,6 +27,7 @@ function client_services_monitor_config()
         'author' => 'WHMCS Custom Modules',
         'language' => 'english',
         'version' => '1.0.0',
+        'logo' => 'logo.png',
         'fields' => [
             'default_status' => [
                 'FriendlyName' => 'Default Status',
