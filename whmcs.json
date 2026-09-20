@@ -1,0 +1,35 @@
+{
+  "schema": "1.1",
+  "type": "whmcs-addons",
+  "name": "client_services_monitor",
+  "license": "proprietary",
+  "category": "management",
+  "logo": {
+    "filename": "logo.png"
+  },
+  "description": {
+    "name": "Client Services & Expiry Monitor",
+    "tagline": "Real-time client active services & domains monitoring sorted by next due date with WhatsApp & Call connect",
+    "long": "A modern, real-time WHMCS addon module to monitor all active client products, services, and domains sorted by next due date with client phone number, one-click WhatsApp chat, and direct phone call connect.",
+    "features": [
+      "Live real-time product & service monitoring without page reloads",
+      "Automatic sorting by next due date (expiring soonest on top)",
+      "Displays client phone number with 1-click WhatsApp & Call buttons",
+      "Multi-type filtering: VPS/Servers, Shared, Reseller, and Domains",
+      "Quick expiry filters (Due Today, 3 Days, 7 Days, Overdue)",
+      "Instant debounced search across clients, phones, domains, and IPs",
+      "Auto-refresh polling engine (15s, 30s, 60s)"
+    ]
+  },
+  "support": {
+    "homepage": "https://github.com/samsusiyam/Client-Services-Expiry-Monitor",
+    "learn_more": "https://github.com/samsusiyam/Client-Services-Expiry-Monitor",
+    "docs_url": "https://github.com/samsusiyam/Client-Services-Expiry-Monitor"
+  },
+  "authors": [
+    {
+      "name": "Samsusiyam",
+      "homepage": "https://github.com/samsusiyam"
+    }
+  ]
+}
