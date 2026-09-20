@@ -1,0 +1,518 @@
+/* WHMCS Client Services & Expiry Monitor Stylesheet */
+
+.csm-container {
+    padding: 15px 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Header */
+.csm-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #e9ecef;
+    padding-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.csm-title {
+    margin: 0 0 5px 0;
+    font-size: 22px;
+    font-weight: 700;
+    color: #2c3e50;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.csm-live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #e6fffa;
+    color: #234e52;
+    border: 1px solid #b2f5ea;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.csm-pulse-dot {
+    width: 8px;
+    height: 8px;
+    background-color: #38b2ac;
+    border-radius: 50%;
+    box-shadow: 0 0 0 0 rgba(56, 178, 172, 0.7);
+    animation: csmPulse 1.8s infinite;
+}
+
+@keyframes csmPulse {
+    0% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(56, 178, 172, 0.7);
+    }
+    70% {
+        transform: scale(1);
+        box-shadow: 0 0 0 8px rgba(56, 178, 172, 0);
+    }
+    100% {
+        transform: scale(0.95);
+        box-shadow: 0 0 0 0 rgba(56, 178, 172, 0);
+    }
+}
+
+.csm-subtitle {
+    margin: 0;
+    color: #7f8c8d;
+    font-size: 13px;
+}
+
+.csm-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.csm-auto-refresh {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #555;
+}
+
+.csm-auto-refresh select {
+    width: auto;
+    display: inline-block;
+    height: 32px;
+}
+
+/* Stats Cards */
+.csm-stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.csm-stat-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 15px;
+    display: flex;
+    align-items: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+    border-left: 4px solid #3498db;
+    cursor: pointer;
+    transition: all 0.2s ease-in-out;
+}
+
+.csm-stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+}
+
+.csm-stat-card.card-total {
+    border-left-color: #3498db;
+}
+
+.csm-stat-card.card-due-today {
+    border-left-color: #e67e22;
+}
+
+.csm-stat-card.card-due-3days {
+    border-left-color: #f39c12;
+}
+
+.csm-stat-card.card-due-7days {
+    border-left-color: #2980b9;
+}
+
+.csm-stat-card.card-overdue {
+    border-left-color: #e74c3c;
+}
+
+.csm-stat-icon {
+    width: 45px;
+    height: 45px;
+    border-radius: 50%;
+    background: #f4f6f9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    margin-right: 12px;
+    color: #555;
+}
+
+.csm-stat-info {
+    display: flex;
+    flex-direction: column;
+}
+
+.csm-stat-count {
+    font-size: 22px;
+    font-weight: 700;
+    color: #2c3e50;
+    line-height: 1.2;
+}
+
+.csm-stat-label {
+    font-size: 12px;
+    color: #7f8c8d;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+/* Filter Box */
+.csm-filter-panel {
+    border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+    border: 1px solid #dfe6e9;
+    margin-bottom: 20px;
+}
+
+.csm-filter-panel .panel-heading {
+    background: #f8f9fa;
+    border-bottom: 1px solid #e9ecef;
+    font-weight: 600;
+    color: #333;
+    padding: 10px 15px;
+}
+
+.csm-filter-panel .form-group {
+    margin-bottom: 10px;
+}
+
+.csm-filter-panel label.control-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: #4a5568;
+    padding-top: 6px;
+}
+
+.csm-filter-buttons {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px dashed #e2e8f0;
+}
+
+.csm-filter-buttons .btn {
+    padding: 7px 20px;
+    font-weight: 600;
+    margin: 0 5px;
+}
+
+/* Table Meta & Controls */
+.csm-table-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: #555;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.csm-record-count {
+    font-weight: 600;
+    color: #2d3748;
+}
+
+.csm-meta-controls {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.csm-meta-controls select {
+    display: inline-block;
+    width: auto;
+    height: 30px;
+    padding: 3px 8px;
+}
+
+/* Table Design */
+.csm-table-wrapper {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+}
+
+.csm-table {
+    margin-bottom: 0;
+    font-size: 13px;
+}
+
+.csm-table thead th {
+    background: #2b3940;
+    color: #ffffff;
+    font-weight: 600;
+    padding: 10px 12px;
+    border-bottom: none;
+    white-space: nowrap;
+}
+
+.csm-table tbody tr {
+    transition: background 0.15s ease-in-out;
+}
+
+.csm-table tbody tr:hover {
+    background-color: #f1f8ff !important;
+}
+
+.csm-table td {
+    padding: 10px 12px;
+    vertical-align: middle;
+}
+
+/* Sub details below main title in rows */
+.csm-sub-meta {
+    font-size: 11px;
+    color: #718096;
+    margin-top: 4px;
+    line-height: 1.4;
+}
+
+.csm-sub-meta span {
+    display: inline-block;
+    margin-right: 10px;
+}
+
+/* Product & Client Links */
+.csm-item-title {
+    font-weight: 600;
+    color: #2b6cb0;
+    text-decoration: none;
+}
+
+.csm-item-title:hover {
+    text-decoration: underline;
+    color: #2c5282;
+}
+
+.csm-client-link {
+    font-weight: 600;
+    color: #2b6cb0;
+    text-decoration: none;
+}
+
+.csm-client-link:hover {
+    text-decoration: underline;
+}
+
+.csm-domain-link {
+    color: #3182ce;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+.csm-domain-link:hover {
+    text-decoration: underline;
+}
+
+.csm-www-link {
+    font-size: 10px;
+    color: #e53e3e;
+    margin-left: 3px;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+/* Phone & WhatsApp Contact Box */
+.csm-phone-box {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.csm-phone-text {
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: #2d3748;
+}
+
+.csm-contact-actions {
+    display: flex;
+    gap: 5px;
+    align-items: center;
+}
+
+.csm-contact-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-decoration: none;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.csm-btn-whatsapp {
+    background-color: #25D366;
+    color: #fff;
+}
+
+.csm-btn-whatsapp:hover {
+    background-color: #1ebd5a;
+    color: #fff;
+    text-decoration: none;
+}
+
+.csm-btn-call {
+    background-color: #3182ce;
+    color: #fff;
+}
+
+.csm-btn-call:hover {
+    background-color: #2b6cb0;
+    color: #fff;
+    text-decoration: none;
+}
+
+.csm-btn-copy {
+    background-color: #edf2f7;
+    color: #4a5568;
+    border: 1px solid #cbd5e0;
+}
+
+.csm-btn-copy:hover {
+    background-color: #e2e8f0;
+    color: #2d3748;
+}
+
+/* Price Display */
+.csm-price-box {
+    font-weight: 600;
+    color: #2d3748;
+    font-size: 13px;
+}
+
+/* Due Date and Days Left Badges */
+.csm-due-box {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.csm-due-date {
+    font-weight: 600;
+    font-size: 12px;
+    color: #2d3748;
+}
+
+.csm-due-badge {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    display: inline-block;
+    width: fit-content;
+}
+
+/* Status Badges */
+.badge-status {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 7px;
+    border-radius: 3px;
+    letter-spacing: 0.5px;
+}
+
+.badge-active {
+    background-color: #48bb78 !important;
+    color: #fff !important;
+}
+
+.badge-suspended {
+    background-color: #ed8936 !important;
+    color: #fff !important;
+}
+
+.badge-pending {
+    background-color: #4299e1 !important;
+    color: #fff !important;
+}
+
+.badge-terminated, .badge-cancelled {
+    background-color: #f56565 !important;
+    color: #fff !important;
+}
+
+/* Pagination */
+.csm-pagination-bottom-wrapper {
+    margin-top: 15px;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.csm-pagination-list {
+    display: inline-flex;
+    padding-left: 0;
+    margin: 0;
+    border-radius: 4px;
+    list-style: none;
+}
+
+.csm-pagination-list > li > a,
+.csm-pagination-list > li > span {
+    position: relative;
+    float: left;
+    padding: 6px 12px;
+    line-height: 1.42857143;
+    text-decoration: none;
+    color: #337ab7;
+    background-color: #fff;
+    border: 1px solid #ddd;
+    margin-left: -1px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+.csm-pagination-list > li.active > a {
+    z-index: 2;
+    color: #fff;
+    background-color: #337ab7;
+    border-color: #337ab7;
+}
+
+.csm-pagination-list > li.disabled > a {
+    color: #777;
+    background-color: #fff;
+    border-color: #ddd;
+    cursor: not-allowed;
+}
+
+/* Loading & Empty State */
+.csm-loading-state {
+    padding: 40px 0 !important;
+}
+
+.csm-spinner p {
+    margin-top: 10px;
+    color: #718096;
+    font-size: 14px;
+}
+
+.csm-empty-state {
+    padding: 40px 0;
+    color: #a0aec0;
+}
+
+.csm-empty-state i {
+    font-size: 40px;
+    margin-bottom: 10px;
+}
