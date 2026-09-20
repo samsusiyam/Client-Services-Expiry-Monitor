@@ -23,7 +23,7 @@ function client_services_monitor_config()
 {
     return [
         'name' => 'Client Services & Expiry Monitor',
-        'description' => 'ক্লায়েন্টের সকল একটিভ সার্ভিস ও ডোমেইনের লাইভ মনিটরিং, এক্সপায়ারি/রিনিউয়াল ডেট অনুযায়ী অটো-সর্টিং, ফোন নম্বর এবং WhatsApp কুইক কানেক্ট ড্যাশবোর্ড।',
+        'description' => 'Live real-time monitoring of client active products, services and domains sorted by next due date with client phone number, one-click WhatsApp and call connect.',
         'author' => 'WHMCS Custom Modules',
         'language' => 'english',
         'version' => '1.0.0',
@@ -38,7 +38,7 @@ function client_services_monitor_config()
                     'All' => 'All Statuses',
                 ],
                 'Default' => 'Active',
-                'Description' => 'ডিফল্টভাবে কোন স্ট্যাটাসের সার্ভিসগুলো লোড হবে।',
+                'Description' => 'Select default status for services loaded on page load.',
             ],
             'records_per_page' => [
                 'FriendlyName' => 'Default Records Per Page',
@@ -50,21 +50,21 @@ function client_services_monitor_config()
                     '250' => '250 Records',
                 ],
                 'Default' => '50',
-                'Description' => 'প্রতি পেজে কতগুলো রেকর্ড প্রদর্শিত হবে।',
+                'Description' => 'Number of service records displayed per page.',
             ],
             'highlight_days' => [
                 'FriendlyName' => 'Expiring Soon Warning (Days)',
                 'Type' => 'text',
                 'Size' => '5',
                 'Default' => '7',
-                'Description' => 'মেয়াদ শেষ হওয়ার কতদিন আগের সার্ভিসগুলোকে সতর্কতামূলক কালার ব্যাজ দিয়ে হাইলাইট করা হবে।',
+                'Description' => 'Number of days before expiry to highlight services with warning badge.',
             ],
             'default_country_code' => [
                 'FriendlyName' => 'Default WhatsApp Country Code',
                 'Type' => 'text',
                 'Size' => '5',
                 'Default' => '880',
-                'Description' => 'ফোন নম্বরে কান্ট্রি কোড না থাকলে WhatsApp লিংকের জন্য ডিফল্ট কোড (যেমন: বাংলাদেশের জন্য 880)।',
+                'Description' => 'Default country code (e.g. 880 for Bangladesh) if phone number lacks country code.',
             ],
         ]
     ];
