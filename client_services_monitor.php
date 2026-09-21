@@ -27,7 +27,6 @@ function client_services_monitor_config()
         'author' => 'Bahari IT',
         'language' => 'english',
         'version' => '1.0.0',
-        'logo' => 'logo.png',
         'fields' => [
             'default_status' => [
                 'FriendlyName' => 'Default Status',
