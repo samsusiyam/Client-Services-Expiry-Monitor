@@ -1127,21 +1127,44 @@ if (!function_exists('csm_render_custom_customers_page')) {
             }
         }
 
+        // Compute per-client item counts
+        $clientItemCounts = [];
+        foreach ($unifiedRecords as $r) {
+            $uId = (int)($r['userid'] ?? 0);
+            if ($uId > 0) {
+                $clientItemCounts[$uId] = ($clientItemCounts[$uId] ?? 0) + 1;
+            }
+        }
+
         // Monitored Clients Chips Bar
         $clientChipsHtml = '';
         if (!empty($monitoredClients) && $monitoredClients->count() > 0) {
+            $clientChipsHtml .= '<button type="button" class="btn btn-default btn-xs csm-client-filter-chip active-chip" id="csmChipAll" onclick="csmFilterByClient(\'\')" style="border-radius:20px;font-weight:700;margin:3px 4px 3px 0;background:#12589b;color:#fff;border-color:#12589b;padding:4px 12px;"><i class="fas fa-layer-group"></i> All (' . count($unifiedRecords) . ')</button>';
             foreach ($monitoredClients as $mc) {
                 $cName = trim($mc->firstname . ' ' . $mc->lastname);
                 $cComp = $mc->companyname ? ' (' . $mc->companyname . ')' : '';
+                $itemCount = $clientItemCounts[$mc->id] ?? 0;
                 $removeUrl = $moduleLink . '&action=remove_monitored_client&userid=' . $mc->id;
-                $clientChipsHtml .= '<span class="csm-client-chip" style="display:inline-flex;align-items:center;background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;margin:3px 4px 3px 0;">'
+                $clientChipsHtml .= '<span class="csm-client-chip" data-userid="' . $mc->id . '" onclick="csmFilterByClient(' . $mc->id . ')" style="cursor:pointer;display:inline-flex;align-items:center;background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;margin:3px 4px 3px 0;transition:all 0.15s ease;" title="Click to filter services for ' . csm_h($cName) . '">'
                     . '<i class="fas fa-user-check text-primary" style="margin-right:5px;"></i>'
-                    . '<a href="clientssummary.php?userid=' . $mc->id . '" target="_blank" style="color:#0369a1;text-decoration:none;">#' . $mc->id . ' ' . csm_h($cName) . csm_h($cComp) . '</a>'
-                    . '<a href="' . csm_h($removeUrl) . '" onclick="return csmConfirmDelete(this.href, \'Remove #' . $mc->id . ' ' . csm_h(addslashes($cName)) . ' from Custom Monitor?\')" style="color:#dc2626;margin-left:8px;font-weight:900;text-decoration:none;" title="Remove from Monitor">&times;</a>'
+                    . '<span class="csm-chip-label">#' . $mc->id . ' ' . csm_h($cName) . csm_h($cComp) . ' <strong style="color:#0f5ea8;">(' . $itemCount . ')</strong></span>'
+                    . '<a href="clientssummary.php?userid=' . $mc->id . '" target="_blank" onclick="event.stopPropagation()" style="color:#64748b;margin-left:6px;font-size:11px;" title="View WHMCS Profile"><i class="fas fa-external-link-alt"></i></a>'
+                    . '<a href="' . csm_h($removeUrl) . '" onclick="event.stopPropagation(); return csmConfirmDelete(this.href, \'Remove #' . $mc->id . ' ' . csm_h(addslashes($cName)) . ' from Custom Monitor?\')" style="color:#dc2626;margin-left:8px;font-weight:900;text-decoration:none;font-size:14px;" title="Remove from Monitor">&times;</a>'
                     . '</span>';
             }
         } else {
             $clientChipsHtml = '<span class="text-muted" style="font-size:12.5px;"><i class="fas fa-info-circle"></i> No specific clients added yet. Click <strong>"Add Clients to Monitor"</strong> to select your high-value / VIP clients.</span>';
+        }
+
+        // Client Filter Options
+        $clientFilterOptions = '<option value="">All Monitored Clients (' . (!empty($monitoredClients) ? $monitoredClients->count() : 0) . ')</option>';
+        if (!empty($monitoredClients)) {
+            foreach ($monitoredClients as $mc) {
+                $cName = trim($mc->firstname . ' ' . $mc->lastname);
+                $cComp = $mc->companyname ? ' (' . $mc->companyname . ')' : '';
+                $itemCount = $clientItemCounts[$mc->id] ?? 0;
+                $clientFilterOptions .= '<option value="' . $mc->id . '">#' . $mc->id . ' - ' . csm_h($cName) . csm_h($cComp) . ' (' . $itemCount . ')</option>';
+            }
         }
 
         // 6 Summary Stats Cards
@@ -1201,14 +1224,23 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     </h3>
                     <div class="csm-muted">Showing all services, domains &amp; custom dues for the selected clients, sorted by next due date.</div>
                 </div>
-                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-                    <div class="input-group" style="width:240px;">
-                        <input type="text" id="customMonitorSearchInput" class="form-control" placeholder="Search service, client, domain...">
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                    <div class="input-group" style="width:210px;">
+                        <input type="text" id="customMonitorSearchInput" class="form-control" placeholder="Search service, client...">
                         <span class="input-group-btn">
                             <button class="btn btn-default" type="button" id="customMonitorSearchClear" title="Clear"><i class="fas fa-times"></i></button>
                         </span>
                     </div>
-                    <select id="customMonitorStatusFilter" class="form-control" style="width:135px;display:inline-block;">
+                    <select id="customMonitorClientFilter" class="form-control" style="width:190px;display:inline-block;" title="Filter by Client">
+                        ' . $clientFilterOptions . '
+                    </select>
+                    <select id="customMonitorTypeFilter" class="form-control" style="width:130px;display:inline-block;" title="Filter by Service Type">
+                        <option value="">All Types</option>
+                        <option value="service">Hosting / Services</option>
+                        <option value="domain">Domains</option>
+                        <option value="custom_customer">Custom / Offline</option>
+                    </select>
+                    <select id="customMonitorStatusFilter" class="form-control" style="width:130px;display:inline-block;" title="Filter by Status">
                         <option value="">All Statuses</option>
                         <option value="active">Active</option>
                         <option value="unpaid">Unpaid</option>
@@ -1350,7 +1382,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
                 $searchCorpus = strtolower($r['id'] . ' ' . $r['client_name'] . ' ' . $r['company'] . ' ' . $r['email'] . ' ' . $cleanDisplayPhone . ' ' . $r['product_name'] . ' ' . $r['domain'] . ' ' . $r['status'] . ' ' . ($latestNote ? $latestNote->note : ''));
 
-                $html .= '<tr class="csm-custom-row" data-search="' . csm_h($searchCorpus) . '" data-status="' . csm_h($statusLower) . '" data-due="' . csm_h($dueCategory) . '">
+                $html .= '<tr class="csm-custom-row" data-search="' . csm_h($searchCorpus) . '" data-status="' . csm_h($statusLower) . '" data-due="' . csm_h($dueCategory) . '" data-userid="' . (int)$r['userid'] . '" data-type="' . csm_h($r['record_type']) . '">
                     <td><strong>#' . $r['id'] . '</strong>' . ($r['is_custom'] ? '<br><span class="label label-default" style="font-size:9px;">Custom</span>' : '') . '</td>
                     <td>
                         <strong>' . csm_h($r['product_name']) . '</strong>
@@ -1743,13 +1775,47 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 applyCustomMonitorFilters();
             });
 
+            $("#customMonitorClientFilter").on("change", function() {
+                var uId = $(this).val();
+                highlightActiveClientChip(uId);
+                applyCustomMonitorFilters();
+            });
+
+            $("#customMonitorTypeFilter").on("change", function() {
+                applyCustomMonitorFilters();
+            });
+
             $("#customMonitorStatusFilter").on("change", function() {
                 applyCustomMonitorFilters();
             });
         });
 
+        function highlightActiveClientChip(userId) {
+            $(".csm-client-chip").css("background", "#e0f2fe").css("color", "#0369a1").css("border-color", "#bae6fd");
+            $(".csm-client-chip").find("i").addClass("text-primary").css("color", "");
+            $(".csm-client-chip").find("strong").css("color", "#0f5ea8");
+            $("#csmChipAll").css("background", "#f8fafc").css("color", "#334155").css("border-color", "#d6e0ec");
+
+            if (!userId) {
+                $("#csmChipAll").css("background", "#12589b").css("color", "#fff").css("border-color", "#12589b");
+            } else {
+                var $active = $(".csm-client-chip[data-userid=\'" + userId + "\']");
+                $active.css("background", "#12589b").css("color", "#ffffff").css("border-color", "#12589b");
+                $active.find("i").removeClass("text-primary").css("color", "#ffffff");
+                $active.find("strong").css("color", "#7dd3fc");
+            }
+        }
+
+        window.csmFilterByClient = function(userId) {
+            $("#customMonitorClientFilter").val(userId ? String(userId) : "");
+            highlightActiveClientChip(userId);
+            applyCustomMonitorFilters();
+        };
+
         function applyCustomMonitorFilters() {
             var search = ($("#customMonitorSearchInput").val() || "").toLowerCase().trim();
+            var clientFilter = ($("#customMonitorClientFilter").val() || "").toString().trim();
+            var typeFilter = ($("#customMonitorTypeFilter").val() || "").toLowerCase().trim();
             var statusFilter = ($("#customMonitorStatusFilter").val() || "").toLowerCase().trim();
             var visibleCount = 0;
 
@@ -1758,8 +1824,12 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 var rowSearch = $row.data("search") || "";
                 var rowStatus = ($row.data("status") || "").toString().toLowerCase();
                 var rowDue = ($row.data("due") || "").toString().toLowerCase();
+                var rowUserid = ($row.data("userid") || "").toString().trim();
+                var rowType = ($row.data("type") || "").toString().toLowerCase();
 
                 var matchesSearch = !search || rowSearch.indexOf(search) > -1;
+                var matchesClient = !clientFilter || (rowUserid === clientFilter);
+                var matchesType = !typeFilter || (rowType === typeFilter);
                 var matchesStatus = true;
 
                 if (statusFilter) {
@@ -1770,7 +1840,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     }
                 }
 
-                if (matchesSearch && matchesStatus) {
+                if (matchesSearch && matchesClient && matchesType && matchesStatus) {
                     $row.show();
                     visibleCount++;
                 } else {
