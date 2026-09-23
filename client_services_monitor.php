@@ -111,10 +111,21 @@ if (!function_exists('csm_ensure_tables')) {
                 Capsule::schema()->create('mod_csm_monitored_clients', function ($table) {
                     $table->increments('id');
                     $table->unsignedInteger('userid')->unique();
+                    $table->string('monitor_mode', 20)->default('all'); // 'all', 'specific'
+                    $table->text('monitored_services')->nullable(); // JSON array of service IDs
+                    $table->text('monitored_domains')->nullable(); // JSON array of domain IDs
                     $table->text('notes')->nullable();
                     $table->dateTime('created_at')->nullable();
                     $table->dateTime('updated_at')->nullable();
                 });
+            } else {
+                if (!Capsule::schema()->hasColumn('mod_csm_monitored_clients', 'monitor_mode')) {
+                    Capsule::schema()->table('mod_csm_monitored_clients', function ($table) {
+                        $table->string('monitor_mode', 20)->default('all')->after('userid');
+                        $table->text('monitored_services')->nullable()->after('monitor_mode');
+                        $table->text('monitored_domains')->nullable()->after('monitored_services');
+                    });
+                }
             }
 
             return true;
@@ -919,17 +930,18 @@ if (!function_exists('csm_render_custom_customers_page')) {
         }
 
         // Fetch Monitored Client IDs
-        $monitoredRows = Capsule::table('mod_csm_monitored_clients')->get();
-        $monitoredUserIds = $monitoredRows->pluck('userid')->toArray();
+        $monitoredRows = Capsule::table('mod_csm_monitored_clients')->get()->keyBy('userid');
+        $monitoredUserIds = $monitoredRows->keys()->toArray();
 
         // Auto-seed from custom customers if table is new
         if (empty($monitoredUserIds)) {
             $legacyUserIds = Capsule::table('mod_csm_custom_customers')->whereNotNull('userid')->where('userid', '>', 0)->pluck('userid')->unique()->toArray();
             if (!empty($legacyUserIds)) {
                 foreach ($legacyUserIds as $uId) {
-                    Capsule::table('mod_csm_monitored_clients')->updateOrInsert(['userid' => $uId], ['created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]);
+                    Capsule::table('mod_csm_monitored_clients')->updateOrInsert(['userid' => $uId], ['monitor_mode' => 'all', 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')]);
                 }
-                $monitoredUserIds = $legacyUserIds;
+                $monitoredRows = Capsule::table('mod_csm_monitored_clients')->get()->keyBy('userid');
+                $monitoredUserIds = $monitoredRows->keys()->toArray();
             }
         }
 
@@ -968,6 +980,19 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     'tblclients.currency as client_currency'
                 )
                 ->get();
+
+            // Filter out services if client is configured with 'specific' monitor mode
+            if ($services->isNotEmpty()) {
+                $services = $services->filter(function ($srv) use ($monitoredRows) {
+                    $cfg = $monitoredRows->get($srv->userid);
+                    if (!$cfg) return true;
+                    if ($cfg->monitor_mode === 'specific') {
+                        $allowed = !empty($cfg->monitored_services) ? json_decode($cfg->monitored_services, true) : [];
+                        return is_array($allowed) && in_array((int)$srv->item_id, array_map('intval', $allowed), true);
+                    }
+                    return true;
+                });
+            }
         }
 
         // Fetch WHMCS Domains for Monitored Clients
@@ -985,6 +1010,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     'tbldomains.registrationperiod as billingcycle',
                     'tbldomains.nextduedate',
                     'tbldomains.status',
+                    'tbldomains.status as domain_status',
                     Capsule::raw("'' as username"),
                     Capsule::raw("'' as dedicatedip"),
                     Capsule::raw("'Domain Registration' as product_name"),
@@ -999,6 +1025,19 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     'tblclients.currency as client_currency'
                 )
                 ->get();
+
+            // Filter out domains if client is configured with 'specific' monitor mode
+            if ($domains->isNotEmpty()) {
+                $domains = $domains->filter(function ($dom) use ($monitoredRows) {
+                    $cfg = $monitoredRows->get($dom->userid);
+                    if (!$cfg) return true;
+                    if ($cfg->monitor_mode === 'specific') {
+                        $allowed = !empty($cfg->monitored_domains) ? json_decode($cfg->monitored_domains, true) : [];
+                        return is_array($allowed) && in_array((int)$dom->item_id, array_map('intval', $allowed), true);
+                    }
+                    return true;
+                });
+            }
         }
 
         // Fetch Custom / Offline Items
@@ -1165,7 +1204,8 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 $clientChipsHtml .= '<span class="csm-client-chip" data-userid="' . $mc->id . '" onclick="csmFilterByClient(' . $mc->id . ')" style="cursor:pointer;display:inline-flex;align-items:center;background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;margin:3px 4px 3px 0;transition:all 0.15s ease;" title="Click to filter services for ' . csm_h($cName) . '">'
                     . '<i class="fas fa-user-check text-primary" style="margin-right:5px;"></i>'
                     . '<span class="csm-chip-label">#' . $mc->id . ' ' . csm_h($cName) . csm_h($cComp) . ' <strong style="color:#0f5ea8;">(' . $itemCount . ')</strong></span>'
-                    . '<a href="clientssummary.php?userid=' . $mc->id . '" target="_blank" onclick="event.stopPropagation()" style="color:#64748b;margin-left:6px;font-size:11px;" title="View WHMCS Profile"><i class="fas fa-external-link-alt"></i></a>'
+                    . '<a href="javascript:void(0)" onclick="event.stopPropagation(); openConfigureClientModal(' . $mc->id . ')" style="color:#0284c7;margin-left:6px;font-size:12px;padding:1px 3px;" title="Configure Monitored Services &amp; Scope"><i class="fas fa-sliders"></i></a>'
+                    . '<a href="clientssummary.php?userid=' . $mc->id . '" target="_blank" onclick="event.stopPropagation()" style="color:#64748b;margin-left:4px;font-size:11px;" title="View WHMCS Profile"><i class="fas fa-external-link-alt"></i></a>'
                     . '<a href="' . csm_h($removeUrl) . '" onclick="event.stopPropagation(); return csmConfirmDelete(this.href, \'Remove #' . $mc->id . ' ' . csm_h(addslashes($cName)) . ' from Custom Monitor?\')" style="color:#dc2626;margin-left:8px;font-weight:900;text-decoration:none;font-size:14px;" title="Remove from Monitor">&times;</a>'
                     . '</span>';
             }
@@ -1536,20 +1576,27 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
         $html .= '</tbody></table></div></div>';
 
-        // Modal 1: Add Monitored Clients Modal
+        // Modal 1: Add / Configure Monitored Clients Modal (Hybrid Scope & Bulk Add)
         $clientPickerOptionsHtml = '';
+        $clientSingleMonitoredOptionsHtml = '<option value="">-- Choose Client to Configure --</option>';
         if (!empty($allClients)) {
             foreach ($allClients as $cl) {
                 $phoneClean = str_replace('.', ' ', $cl->phonenumber ?: '');
                 $compClean = $cl->companyname ?: '';
                 $fullName = trim($cl->firstname . ' ' . $cl->lastname);
                 $isAlreadyMonitored = in_array((int)$cl->id, $monitoredUserIds, true);
-                $clientPickerOptionsHtml .= '<option value="' . $cl->id . '"'
+
+                $opt = '<option value="' . $cl->id . '"'
                     . ' data-name="' . csm_h($fullName) . '"'
                     . ' data-company="' . csm_h($compClean) . '"'
                     . ' data-email="' . csm_h($cl->email ?: '') . '"'
-                    . ' data-phone="' . csm_h($phoneClean) . '"'
-                    . ($isAlreadyMonitored ? ' selected' : '') . '>'
+                    . ' data-phone="' . csm_h($phoneClean) . '"';
+
+                $clientPickerOptionsHtml .= $opt . ($isAlreadyMonitored ? ' selected' : '') . '>'
+                    . '#' . $cl->id . ' - ' . csm_h($fullName) . ($compClean ? ' (' . csm_h($compClean) . ')' : '') . ' - ' . csm_h($cl->email) . ($phoneClean ? ' | ' . csm_h($phoneClean) : '')
+                    . '</option>';
+
+                $clientSingleMonitoredOptionsHtml .= $opt . '>'
                     . '#' . $cl->id . ' - ' . csm_h($fullName) . ($compClean ? ' (' . csm_h($compClean) . ')' : '') . ' - ' . csm_h($cl->email) . ($phoneClean ? ' | ' . csm_h($phoneClean) : '')
                     . '</option>';
             }
@@ -1557,27 +1604,77 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
         $html .= '
         <div id="csmAddMonitoredClientsModal" class="modal fade" tabindex="-1" role="dialog" style="display:none;">
-            <div class="modal-dialog modal-md" role="document">
+            <div class="modal-dialog modal-lg" role="document">
                 <div class="modal-content" style="border-radius:10px;overflow:hidden;">
-                    <form method="post" action="' . csm_h($moduleLink) . '&action=add_monitored_clients">
-                        <div class="modal-header" style="background:#12589b;color:#fff;padding:16px 20px;">
+                    <form method="post" action="' . csm_h($moduleLink) . '&action=add_monitored_clients" id="csmMonitoredClientsForm">
+                        <input type="hidden" name="add_mode" id="csmAddModeInput" value="single">
+                        <div class="modal-header" style="background:#12589b;color:#fff;padding:16px 22px;border-bottom:0;">
                             <button type="button" class="close" data-dismiss="modal" style="color:#fff;opacity:0.9;font-size:24px;">&times;</button>
-                            <h4 class="modal-title" style="font-weight:700;"><i class="fas fa-user-plus"></i> Select Clients to Monitor</h4>
+                            <h4 class="modal-title" style="font-weight:700;"><i class="fas fa-users-gear"></i> Manage Monitored Clients &amp; Service Scope</h4>
+                        </div>
+                        <div style="background:#0e477d;padding:0 22px;">
+                            <ul class="nav nav-tabs" style="border-bottom:none;margin-bottom:0;" id="csmModalTabs">
+                                <li class="active"><a href="#csmTabSingleClient" data-toggle="tab" onclick="$(\'#csmAddModeInput\').val(\'single\')" style="font-weight:700;border-radius:6px 6px 0 0;"><i class="fas fa-user-gear"></i> Single Client Scope (Hybrid)</a></li>
+                                <li><a href="#csmTabBulkClients" data-toggle="tab" onclick="$(\'#csmAddModeInput\').val(\'bulk\')" style="font-weight:700;border-radius:6px 6px 0 0;"><i class="fas fa-users"></i> Quick Bulk Add</a></li>
+                            </ul>
                         </div>
                         <div class="modal-body" style="padding:22px;background:#f8fafc;">
-                            <div class="form-group">
-                                <label style="font-weight:700;color:#0f5ea8;"><i class="fas fa-search"></i> Search &amp; Select WHMCS Clients <span class="text-danger">*</span></label>
-                                <select name="client_ids[]" id="csmSelectMonitoredClients" class="form-control" multiple="multiple" style="width:100%;" required>
-                                    ' . $clientPickerOptionsHtml . '
-                                </select>
-                                <small class="help-block" style="margin-top:8px;">
-                                    Search clients by Name, Company, Email or Phone. Select one or multiple clients to add to your dedicated live monitor board.
-                                </small>
+                            <div class="tab-content">
+                                <!-- Tab 1: Single Client Hybrid Setup -->
+                                <div class="tab-pane active" id="csmTabSingleClient">
+                                    <div class="form-group" style="background:#ffffff;padding:14px;border-radius:8px;border:1px solid #cbd5e1;box-shadow:0 1px 3px rgba(0,0,0,0.02);margin-bottom:16px;">
+                                        <label style="color:#0f5ea8;font-weight:700;font-size:13.5px;"><i class="fas fa-search"></i> Select WHMCS Client <span class="text-danger">*</span></label>
+                                        <select name="client_id" id="csmHybridClientSelect" class="form-control" style="width:100%;">
+                                            ' . $clientSingleMonitoredOptionsHtml . '
+                                        </select>
+                                    </div>
+
+                                    <div class="form-group" style="background:#ffffff;padding:14px 16px;border-radius:8px;border:1px solid #cbd5e1;margin-bottom:16px;">
+                                        <label style="font-weight:800;color:#1e293b;display:block;margin-bottom:10px;font-size:13.5px;"><i class="fas fa-sliders text-primary"></i> Monitoring Scope</label>
+                                        <div style="display:flex;gap:20px;flex-wrap:wrap;">
+                                            <label style="cursor:pointer;font-weight:600;color:#334155;margin:0;display:flex;align-items:center;gap:8px;">
+                                                <input type="radio" name="monitor_mode" value="all" id="csmScopeAll" checked onchange="csmToggleScopeMode()">
+                                                <span><strong>Monitor All Active Services</strong> <small class="text-muted">(Default: Auto-tracks all current &amp; future services)</small></span>
+                                            </label>
+                                            <label style="cursor:pointer;font-weight:600;color:#334155;margin:0;display:flex;align-items:center;gap:8px;">
+                                                <input type="radio" name="monitor_mode" value="specific" id="csmScopeSpecific" onchange="csmToggleScopeMode()">
+                                                <span><strong>Choose Specific Services / Domains</strong> <small class="text-muted">(Custom selection)</small></span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <!-- Specific Items Selection Container -->
+                                    <div id="csmSpecificItemsContainer" style="display:none;background:#ffffff;border:1px solid #cbd5e1;border-radius:8px;padding:16px;margin-bottom:16px;">
+                                        <div id="csmSpecificLoading" style="display:none;text-align:center;padding:25px;color:#0f5ea8;">
+                                            <i class="fas fa-spinner fa-spin fa-2x"></i>
+                                            <p style="margin-top:8px;font-weight:700;">Loading client services &amp; domains...</p>
+                                        </div>
+                                        <div id="csmSpecificContent">
+                                            <p class="text-muted" style="margin:0;"><i class="fas fa-info-circle"></i> Please select a client above to load and select their specific services and domains.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Tab 2: Bulk Multi-Select Clients -->
+                                <div class="tab-pane" id="csmTabBulkClients">
+                                    <div class="form-group" style="background:#ffffff;padding:16px;border-radius:8px;border:1px solid #cbd5e1;">
+                                        <label style="font-weight:700;color:#0f5ea8;margin-bottom:8px;"><i class="fas fa-users"></i> Select Multiple Clients to Monitor</label>
+                                        <select name="bulk_client_ids[]" id="csmBulkSelectClients" class="form-control" multiple="multiple" style="width:100%;">
+                                            ' . $clientPickerOptionsHtml . '
+                                        </select>
+                                        <div class="alert alert-info" style="margin-top:14px;margin-bottom:0;font-size:12.5px;padding:10px 14px;">
+                                            <i class="fas fa-lightbulb"></i> All selected clients will be added with <strong>"Monitor All Services"</strong> mode. You can later click the <strong>[<i class="fas fa-sliders"></i>]</strong> icon on any client\'s chip to select specific services.
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <div class="modal-footer" style="background:#f1f5f9;">
-                            <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
-                            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Monitored Clients</button>
+                        <div class="modal-footer" style="background:#f1f5f9;display:flex;justify-content:space-between;align-items:center;">
+                            <span class="text-muted" style="font-size:12px;"><i class="fas fa-shield-alt"></i> Changes apply immediately to your Custom Monitor board.</span>
+                            <div>
+                                <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                                <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Configuration</button>
+                            </div>
                         </div>
                     </form>
                 </div>
@@ -1809,6 +1906,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
         var CSM_EDIT_NOTE_URL = CSM_MODULE_LINK + "&ajax=edit_note";
         var CSM_DELETE_NOTE_URL = CSM_MODULE_LINK + "&ajax=delete_note";
         var CSM_GET_NOTES_URL = CSM_MODULE_LINK + "&ajax=get_notes";
+        var CSM_GET_CLIENT_ITEMS_URL = CSM_MODULE_LINK + "&ajax=get_client_items";
         var currentEditingNoteId = 0;
 
         $(document).ready(function() {
@@ -1849,8 +1947,25 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     return state.text;
                 }
 
-                $("#csmSelectMonitoredClients").select2({
-                    placeholder: "Search client by name, email, phone, company...",
+                $("#csmHybridClientSelect").select2({
+                    placeholder: "Search & choose client...",
+                    allowClear: true,
+                    width: "100%",
+                    dropdownParent: $("#csmAddMonitoredClientsModal"),
+                    templateResult: csmFormatClientOption,
+                    templateSelection: csmFormatClientSelection,
+                    escapeMarkup: function(m) { return m; }
+                });
+
+                $("#csmHybridClientSelect").on("change", function() {
+                    var val = $(this).val();
+                    if ($("#csmScopeSpecific").is(":checked") && val && val !== "0") {
+                        loadClientSpecificItems(val);
+                    }
+                });
+
+                $("#csmBulkSelectClients").select2({
+                    placeholder: "Search and select multiple clients...",
                     allowClear: true,
                     width: "100%",
                     dropdownParent: $("#csmAddMonitoredClientsModal"),
@@ -2012,7 +2127,168 @@ if (!function_exists('csm_render_custom_customers_page')) {
             }
         }
 
+        window.csmToggleScopeMode = function() {
+            var isSpecific = $("#csmScopeSpecific").is(":checked");
+            if (isSpecific) {
+                $("#csmSpecificItemsContainer").slideDown(150);
+                var clientId = $("#csmHybridClientSelect").val();
+                if (clientId && clientId !== "0") {
+                    loadClientSpecificItems(clientId);
+                }
+            } else {
+                $("#csmSpecificItemsContainer").slideUp(150);
+            }
+        };
+
+        window.loadClientSpecificItems = function(clientId, preselectedServices, preselectedDomains) {
+            if (!clientId || clientId === "0") {
+                $("#csmSpecificContent").html("<p class=\"text-muted\" style=\"margin:0;\"><i class=\"fas fa-info-circle\"></i> Please select a client above to load their services and domains.</p>");
+                return;
+            }
+
+            $("#csmSpecificLoading").show();
+            $("#csmSpecificContent").hide();
+
+            $.ajax({
+                url: CSM_GET_CLIENT_ITEMS_URL + "&userid=" + encodeURIComponent(clientId),
+                type: "GET",
+                dataType: "json",
+                success: function(res) {
+                    $("#csmSpecificLoading").hide();
+                    if (res && res.success) {
+                        var checkedServices = preselectedServices !== undefined ? preselectedServices : (res.monitored_services || []);
+                        var checkedDomains = preselectedDomains !== undefined ? preselectedDomains : (res.monitored_domains || []);
+                        var isAllMode = (res.monitor_mode === "all" && preselectedServices === undefined);
+
+                        var html = "";
+
+                        // Services Section
+                        var servicesList = res.services || [];
+                        html += "<div style=\"margin-bottom:16px;\">";
+                        html += "<div style=\"display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e2e8f0;padding-bottom:6px;margin-bottom:10px;\">";
+                        html += "<h5 style=\"margin:0;font-weight:800;color:#0f5ea8;\"><i class=\"fas fa-server\"></i> Hosting &amp; VPS Services (" + servicesList.length + ")</h5>";
+                        if (servicesList.length > 0) {
+                            html += "<div style=\"display:flex;gap:6px;\">";
+                            html += "<button type=\"button\" class=\"btn btn-default btn-xs\" onclick=\"csmSelectAllSpecific(\'services\', true)\">Select All</button>";
+                            html += "<button type=\"button\" class=\"btn btn-default btn-xs\" onclick=\"csmSelectAllSpecific(\'services\', false)\">Deselect All</button>";
+                            html += "</div>";
+                        }
+                        html += "</div>";
+
+                        if (servicesList.length === 0) {
+                            html += "<p class=\"text-muted\" style=\"font-size:12px;margin-bottom:0;\">No hosting or VPS services found for this client.</p>";
+                        } else {
+                            html += "<div style=\"display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:8px;max-height:220px;overflow-y:auto;padding:2px;\">";
+                            servicesList.forEach(function(s) {
+                                var isChecked = (isAllMode || checkedServices.indexOf(parseInt(s.id, 10)) > -1) ? "checked" : "";
+                                var statusClass = s.status === "Active" ? "success" : (s.status === "Suspended" ? "danger" : "default");
+                                html += "<label style=\"display:flex;align-items:flex-start;gap:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:9px 12px;margin:0;cursor:pointer;font-weight:normal;\">" +
+                                    "<input type=\"checkbox\" name=\"specific_services[]\" value=\"" + s.id + "\" class=\"csm-spec-service-check\" " + isChecked + " style=\"margin-top:3px;\">" +
+                                    "<div style=\"flex-grow:1;font-size:12px;line-height:1.35;\">" +
+                                        "<div style=\"font-weight:700;color:#1e293b;\">#" + s.id + " " + $("<div>").text(s.product_name).html() + "</div>" +
+                                        (s.domain ? "<div style=\"color:#0284c7;font-weight:600;\"><i class=\"fas fa-globe\" style=\"font-size:10px;\"></i> " + $("<div>").text(s.domain).html() + "</div>" : "") +
+                                        "<div style=\"color:#64748b;font-size:11px;margin-top:2px;\">" +
+                                            "<span>Due: " + (s.nextduedate || "N/A") + "</span> &bull; " +
+                                            "<span>" + s.billingcycle + " (" + s.amount + ")</span> &bull; " +
+                                            "<span class=\"label label-" + statusClass + "\" style=\"font-size:9px;padding:1px 5px;\">" + s.status + "</span>" +
+                                        "</div>" +
+                                    "</div>" +
+                                "</label>";
+                            });
+                            html += "</div>";
+                        }
+                        html += "</div>";
+
+                        // Domains Section
+                        var domainsList = res.domains || [];
+                        html += "<div>";
+                        html += "<div style=\"display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e2e8f0;padding-bottom:6px;margin-bottom:10px;\">";
+                        html += "<h5 style=\"margin:0;font-weight:800;color:#0f5ea8;\"><i class=\"fas fa-globe\"></i> Domain Registrations (" + domainsList.length + ")</h5>";
+                        if (domainsList.length > 0) {
+                            html += "<div style=\"display:flex;gap:6px;\">";
+                            html += "<button type=\"button\" class=\"btn btn-default btn-xs\" onclick=\"csmSelectAllSpecific(\'domains\', true)\">Select All</button>";
+                            html += "<button type=\"button\" class=\"btn btn-default btn-xs\" onclick=\"csmSelectAllSpecific(\'domains\', false)\">Deselect All</button>";
+                            html += "</div>";
+                        }
+                        html += "</div>";
+
+                        if (domainsList.length === 0) {
+                            html += "<p class=\"text-muted\" style=\"font-size:12px;margin-bottom:0;\">No domain registrations found for this client.</p>";
+                        } else {
+                            html += "<div style=\"display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:8px;max-height:220px;overflow-y:auto;padding:2px;\">";
+                            domainsList.forEach(function(d) {
+                                var isChecked = (isAllMode || checkedDomains.indexOf(parseInt(d.id, 10)) > -1) ? "checked" : "";
+                                var statusClass = d.status === "Active" ? "success" : "default";
+                                html += "<label style=\"display:flex;align-items:flex-start;gap:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:9px 12px;margin:0;cursor:pointer;font-weight:normal;\">" +
+                                    "<input type=\"checkbox\" name=\"specific_domains[]\" value=\"" + d.id + "\" class=\"csm-spec-domain-check\" " + isChecked + " style=\"margin-top:3px;\">" +
+                                    "<div style=\"flex-grow:1;font-size:12px;line-height:1.35;\">" +
+                                        "<div style=\"font-weight:700;color:#1e293b;\">#" + d.id + " " + $("<div>").text(d.domain).html() + "</div>" +
+                                        "<div style=\"color:#64748b;font-size:11px;margin-top:2px;\">" +
+                                            "<span>Due: " + (d.nextduedate || "N/A") + "</span> &bull; " +
+                                            "<span>" + d.billingcycle + " (" + d.amount + ")</span> &bull; " +
+                                            "<span class=\"label label-" + statusClass + "\" style=\"font-size:9px;padding:1px 5px;\">" + d.status + "</span>" +
+                                        "</div>" +
+                                    "</div>" +
+                                "</label>";
+                            });
+                            html += "</div>";
+                        }
+                        html += "</div>";
+
+                        $("#csmSpecificContent").html(html).show();
+                    } else {
+                        $("#csmSpecificContent").html("<div class=\"alert alert-danger\" style=\"margin:0;\">" + (res.error || "Failed to fetch client items.") + "</div>").show();
+                    }
+                },
+                error: function() {
+                    $("#csmSpecificLoading").hide();
+                    $("#csmSpecificContent").html("<div class=\"alert alert-danger\" style=\"margin:0;\">Network error loading client items.</div>").show();
+                }
+            });
+        };
+
+        window.csmSelectAllSpecific = function(type, check) {
+            if (type === "services") {
+                $(".csm-spec-service-check").prop("checked", check);
+            } else if (type === "domains") {
+                $(".csm-spec-domain-check").prop("checked", check);
+            }
+        };
+
+        window.openConfigureClientModal = function(userId) {
+            $("#csmModalTabs a[href=\"#csmTabSingleClient\"]").tab("show");
+            $("#csmAddModeInput").val("single");
+
+            if ($.fn.select2) {
+                $("#csmHybridClientSelect").val(String(userId)).trigger("change");
+            } else {
+                $("#csmHybridClientSelect").val(String(userId));
+            }
+
+            $.ajax({
+                url: CSM_GET_CLIENT_ITEMS_URL + "&userid=" + encodeURIComponent(userId),
+                type: "GET",
+                dataType: "json",
+                success: function(res) {
+                    if (res && res.success) {
+                        if (res.monitor_mode === "specific") {
+                            $("#csmScopeSpecific").prop("checked", true);
+                            $("#csmSpecificItemsContainer").show();
+                        } else {
+                            $("#csmScopeAll").prop("checked", true);
+                            $("#csmSpecificItemsContainer").hide();
+                        }
+                        loadClientSpecificItems(userId, res.monitored_services, res.monitored_domains);
+                    }
+                }
+            });
+
+            $("#csmAddMonitoredClientsModal").modal("show");
+        };
+
         window.openManageMonitoredClientsModal = function() {
+            $("#csmModalTabs a[href=\"#csmTabSingleClient\"]").tab("show");
+            $("#csmAddModeInput").val("single");
             $("#csmAddMonitoredClientsModal").modal("show");
         };
 
@@ -2850,6 +3126,78 @@ if (!function_exists('client_services_monitor_output')) {
             exit;
         }
 
+        // AJAX Fetch Client Services & Domains for Custom Monitor Configuration
+        if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_client_items') {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+            header('Content-Type: application/json');
+            $uId = (int)($_GET['userid'] ?? 0);
+            if ($uId <= 0) {
+                echo json_encode(['success' => false, 'error' => 'Invalid client ID']);
+                exit;
+            }
+
+            $client = Capsule::table('tblclients')->where('id', $uId)->first(['id', 'firstname', 'lastname', 'companyname', 'email', 'phonenumber', 'currency']);
+            if (!$client) {
+                echo json_encode(['success' => false, 'error' => 'Client not found']);
+                exit;
+            }
+
+            $monitoredConfig = Capsule::table('mod_csm_monitored_clients')->where('userid', $uId)->first();
+            $monitorMode = $monitoredConfig ? ($monitoredConfig->monitor_mode ?: 'all') : 'all';
+            $monitoredServices = ($monitoredConfig && !empty($monitoredConfig->monitored_services)) ? json_decode($monitoredConfig->monitored_services, true) : [];
+            $monitoredDomains = ($monitoredConfig && !empty($monitoredConfig->monitored_domains)) ? json_decode($monitoredConfig->monitored_domains, true) : [];
+
+            $services = Capsule::table('tblhosting')
+                ->join('tblproducts', 'tblhosting.packageid', '=', 'tblproducts.id')
+                ->leftJoin('tblservers', 'tblhosting.server', '=', 'tblservers.id')
+                ->where('tblhosting.userid', $uId)
+                ->select(
+                    'tblhosting.id',
+                    'tblhosting.domain',
+                    'tblhosting.amount',
+                    'tblhosting.billingcycle',
+                    'tblhosting.nextduedate',
+                    'tblhosting.domainstatus as status',
+                    'tblproducts.name as product_name',
+                    'tblproducts.type as product_type',
+                    'tblservers.name as server_name'
+                )
+                ->orderBy('tblhosting.id', 'DESC')
+                ->get();
+
+            $domains = Capsule::table('tbldomains')
+                ->where('userid', $uId)
+                ->select(
+                    'id',
+                    'domain',
+                    'recurringamount as amount',
+                    'registrationperiod as billingcycle',
+                    'nextduedate',
+                    'status'
+                )
+                ->orderBy('id', 'DESC')
+                ->get();
+
+            echo json_encode([
+                'success' => true,
+                'client' => [
+                    'id' => $client->id,
+                    'name' => trim($client->firstname . ' ' . $client->lastname),
+                    'company' => $client->companyname ?: '',
+                    'email' => $client->email ?: '',
+                    'phone' => str_replace('.', ' ', $client->phonenumber ?: ''),
+                ],
+                'monitor_mode' => $monitorMode,
+                'monitored_services' => is_array($monitoredServices) ? array_map('intval', $monitoredServices) : [],
+                'monitored_domains' => is_array($monitoredDomains) ? array_map('intval', $monitoredDomains) : [],
+                'services' => $services,
+                'domains' => $domains,
+            ]);
+            exit;
+        }
+
         // AJAX Fetch Services Data for Live Monitor
         if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
             while (ob_get_level() > 0) {
@@ -3052,22 +3400,50 @@ if (!function_exists('client_services_monitor_output')) {
             }
 
             if ($action === 'add_monitored_clients') {
-                $clientIds = isset($_POST['client_ids']) ? (array)$_POST['client_ids'] : [];
-                $notes = trim($_POST['notes'] ?? '');
                 $now = date('Y-m-d H:i:s');
-                foreach ($clientIds as $uid) {
-                    $uid = (int)$uid;
+                $targetMode = trim($_POST['add_mode'] ?? 'single');
+
+                if ($targetMode === 'bulk') {
+                    // Bulk Add Multiple Clients (Default: Monitor All Services)
+                    $clientIds = isset($_POST['bulk_client_ids']) ? (array)$_POST['bulk_client_ids'] : [];
+                    foreach ($clientIds as $uid) {
+                        $uid = (int)$uid;
+                        if ($uid > 0) {
+                            Capsule::table('mod_csm_monitored_clients')->updateOrInsert(
+                                ['userid' => $uid],
+                                [
+                                    'monitor_mode'       => 'all',
+                                    'monitored_services' => null,
+                                    'monitored_domains'  => null,
+                                    'updated_at'         => $now,
+                                    'created_at'         => $now,
+                                ]
+                            );
+                        }
+                    }
+                } else {
+                    // Single Client Hybrid Configuration
+                    $uid = (int)($_POST['client_id'] ?? 0);
+                    $monitorMode = in_array($_POST['monitor_mode'] ?? 'all', ['all', 'specific'], true) ? $_POST['monitor_mode'] : 'all';
+                    $specificServices = isset($_POST['specific_services']) ? array_values(array_map('intval', (array)$_POST['specific_services'])) : [];
+                    $specificDomains  = isset($_POST['specific_domains']) ? array_values(array_map('intval', (array)$_POST['specific_domains'])) : [];
+                    $notes = trim($_POST['notes'] ?? '');
+
                     if ($uid > 0) {
                         Capsule::table('mod_csm_monitored_clients')->updateOrInsert(
                             ['userid' => $uid],
                             [
-                                'notes' => $notes ?: null,
-                                'updated_at' => $now,
-                                'created_at' => $now,
+                                'monitor_mode'       => $monitorMode,
+                                'monitored_services' => $monitorMode === 'specific' ? json_encode($specificServices) : null,
+                                'monitored_domains'  => $monitorMode === 'specific' ? json_encode($specificDomains) : null,
+                                'notes'              => $notes ?: null,
+                                'updated_at'         => $now,
+                                'created_at'         => $now,
                             ]
                         );
                     }
                 }
+
                 header('Location: ' . $vars['modulelink'] . '&action=custom_customers&saved=1');
                 exit;
             }
