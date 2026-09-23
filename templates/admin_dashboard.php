@@ -9,32 +9,6 @@ if (!defined("WHMCS")) {
 <link rel="stylesheet" href="../modules/addons/client_services_monitor/assets/css/style.css?v=<?php echo time(); ?>">
 
 <div class="csm-container">
-    <!-- Header / Title -->
-    <div class="csm-header">
-        <div class="csm-title-group">
-            <h2 class="csm-title">
-                <i class="fa-solid fa-server text-primary"></i> Client Services & Expiry Monitor
-                <span class="csm-live-badge"><span class="csm-pulse-dot"></span> LIVE Realtime</span>
-            </h2>
-            <p class="csm-subtitle">Live real-time filtering, auto-sorting & instant client services expiry monitoring dashboard</p>
-        </div>
-        <div class="csm-header-actions">
-            <div class="csm-auto-refresh">
-                <label for="csmAutoRefreshSelect"><i class="fa-solid fa-arrows-rotate"></i> Auto Refresh:</label>
-                <select id="csmAutoRefreshSelect" class="form-control input-sm">
-                    <option value="15">Every 15s (Ultra Live)</option>
-                    <option value="30" selected>Every 30s</option>
-                    <option value="60">Every 60s</option>
-                    <option value="120">Every 2m</option>
-                    <option value="0">Manual Only</option>
-                </select>
-            </div>
-            <button id="csmBtnManualRefresh" class="btn btn-default btn-sm" title="Instant Refresh Data">
-                <i class="fa-solid fa-sync" id="csmRefreshIcon"></i> Refresh Now
-            </button>
-        </div>
-    </div>
-
     <!-- Quick Stats Summary Cards -->
     <div class="csm-stats-row">
         <div class="csm-stat-card card-total" onclick="csmSetDueFilter('')">
@@ -74,12 +48,12 @@ if (!defined("WHMCS")) {
         </div>
     </div>
 
-    <!-- Search & Filter Card (Styled like WHMCS native Filter) -->
-    <div class="panel panel-default csm-filter-panel">
-        <div class="panel-heading">
-            <h3 class="panel-title"><i class="fa-solid fa-filter"></i> Search / Filter</h3>
+    <!-- Search & Filter Card -->
+    <div class="panel panel-default csm-filter-panel" style="border-radius:8px;border:1px solid #dce6f2;">
+        <div class="panel-heading" style="background:#f8fafc;padding:12px 18px;">
+            <h3 class="panel-title" style="font-weight:700;font-size:14px;"><i class="fa-solid fa-filter text-primary"></i> Real-Time Search &amp; Filtering</h3>
         </div>
-        <div class="panel-body">
+        <div class="panel-body" style="padding:18px;">
             <form id="csmFilterForm" onsubmit="return false;">
                 <div class="row">
                     <!-- Left Column -->
@@ -179,8 +153,8 @@ if (!defined("WHMCS")) {
                             <label class="col-sm-4 control-label">Status</label>
                             <div class="col-sm-8">
                                 <select id="filterStatus" class="form-control">
-                                    <option value="Active" <?php echo ($config_default_status === 'Active') ? 'selected' : ''; ?>>Active (Default)</option>
-                                    <option value="Active,Suspended" <?php echo ($config_default_status === 'Active,Suspended') ? 'selected' : ''; ?>>Active & Suspended</option>
+                                    <option value="Active" selected>Active (Default)</option>
+                                    <option value="Active,Suspended">Active &amp; Suspended</option>
                                     <option value="Suspended">Suspended</option>
                                     <option value="Pending">Pending</option>
                                     <option value="Terminated">Terminated</option>
@@ -206,13 +180,13 @@ if (!defined("WHMCS")) {
                     </div>
                 </div>
 
-                <div class="row csm-filter-buttons">
+                <div class="row csm-filter-buttons" style="margin-top:10px;">
                     <div class="col-xs-12 text-center">
-                        <button type="button" id="csmBtnSearch" class="btn btn-primary">
+                        <button type="button" id="csmBtnSearch" class="btn btn-primary" style="margin-right:8px;">
                             <i class="fa-solid fa-search"></i> Search / Apply Filter
                         </button>
                         <button type="button" id="csmBtnReset" class="btn btn-default">
-                            <i class="fa-solid fa-rotate-left"></i> Reset
+                            <i class="fa-solid fa-rotate-left"></i> Reset Filters
                         </button>
                     </div>
                 </div>
@@ -220,70 +194,165 @@ if (!defined("WHMCS")) {
         </div>
     </div>
 
-    <!-- Table Meta Bar (Showing records count & Pagination options) -->
-    <div class="csm-table-meta">
+    <!-- Table Meta Bar -->
+    <div class="csm-table-meta" style="margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
         <div class="csm-record-count">
-            <span id="csmRecordCountText">Loading records...</span>
+            <span id="csmRecordCountText" style="font-weight:700;color:#334155;">Loading records...</span>
         </div>
-        <div class="csm-meta-controls">
-            <label>Per Page:
-                <select id="csmPerPageSelect" class="form-control input-sm">
-                    <option value="25" <?php echo $config_per_page == 25 ? 'selected' : ''; ?>>25</option>
-                    <option value="50" <?php echo $config_per_page == 50 ? 'selected' : ''; ?>>50</option>
-                    <option value="100" <?php echo $config_per_page == 100 ? 'selected' : ''; ?>>100</option>
-                    <option value="250" <?php echo $config_per_page == 250 ? 'selected' : ''; ?>>250</option>
+        <div class="csm-meta-controls" style="display:flex;align-items:center;gap:12px;">
+            <label style="margin:0;font-size:13px;display:flex;align-items:center;gap:6px;">Per Page:
+                <select id="csmPerPageSelect" class="form-control input-sm" style="width:auto;display:inline-block;">
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                    <option value="250">250</option>
                 </select>
             </label>
-            <div class="csm-pagination-top" id="csmPaginationTop"></div>
+            <button id="csmBtnManualRefresh" class="btn btn-default btn-sm" title="Refresh Live Data">
+                <i class="fa-solid fa-sync" id="csmRefreshIcon"></i> Refresh
+            </button>
         </div>
     </div>
 
     <!-- Main Results Table -->
-    <div class="table-responsive csm-table-wrapper">
-        <table class="table table-striped table-hover csm-table" id="csmServicesTable">
-            <thead>
-                <tr>
-                    <th width="40" class="text-center"><input type="checkbox" id="csmSelectAll"></th>
-                    <th width="80">ID <i class="fa-solid fa-sort-down"></i></th>
-                    <th>Product / Service</th>
-                    <th>Domain</th>
-                    <th>Client Name</th>
-                    <th>Client Phone / WhatsApp</th>
-                    <th>Price</th>
-                    <th>Billing Cycle</th>
-                    <th>Next Due Date <i class="fa-solid fa-arrow-up-wide-short text-primary" title="Sorted: Expiring Soonest First"></i></th>
-                    <th>Status</th>
-                    <th width="80" class="text-center">Action</th>
-                </tr>
-            </thead>
-            <tbody id="csmTableBody">
-                <tr>
-                    <td colspan="11" class="text-center csm-loading-state">
-                        <div class="csm-spinner">
+    <div class="csm-table-card">
+        <div style="overflow-x:auto;">
+            <table class="csm-table" id="csmServicesTable">
+                <thead>
+                    <tr>
+                        <th width="70">ID</th>
+                        <th>Product / Service</th>
+                        <th>Domain</th>
+                        <th>Client Details</th>
+                        <th>Phone / WhatsApp</th>
+                        <th>Billing</th>
+                        <th>Next Due Date <i class="fa-solid fa-arrow-down-short-wide text-primary"></i></th>
+                        <th>Grace Suspend</th>
+                        <th>Due Note / হিসাব</th>
+                        <th>Status</th>
+                        <th width="90" class="text-center">Action</th>
+                    </tr>
+                </thead>
+                <tbody id="csmTableBody">
+                    <tr>
+                        <td colspan="11" class="text-center csm-loading-state" style="padding:40px;">
                             <i class="fa-solid fa-spinner fa-spin fa-2x text-primary"></i>
-                            <p>Loading services data...</p>
-                        </div>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
+                            <p style="margin-top:10px;color:#64748b;">Loading live services...</p>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <!-- Bottom Pagination -->
-    <div class="csm-pagination-bottom-wrapper">
+    <div class="csm-pagination-bottom-wrapper" style="margin-top:14px;display:flex;justify-content:center;">
         <div id="csmPaginationBottom"></div>
     </div>
 </div>
 
-<!-- Modal for Quick Client Contact or Notes (Optional Enhancement) -->
+<!-- Modal: Due Note / হিসাব Ledger -->
+<div class="modal fade" id="csmNoteModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-md" role="document">
+        <div class="modal-content" style="border-radius:8px;">
+            <div class="modal-header" style="background:#12589b;color:#fff;border-radius:7px 7px 0 0;">
+                <button type="button" class="close" data-dismiss="modal" style="color:#fff;">&times;</button>
+                <h4 class="modal-title"><i class="fas fa-book-bookmark"></i> Service Due Note &amp; Ledger (হিসাব)</h4>
+            </div>
+            <div class="modal-body" style="padding:20px;">
+                <div class="form-group">
+                    <label>Target Service / Client:</label>
+                    <input type="text" id="modalNoteTarget" class="form-control" readonly style="background:#f8fafc;font-weight:700;">
+                    <input type="hidden" id="modalNoteRelType" value="service">
+                    <input type="hidden" id="modalNoteRelId" value="0">
+                </div>
+
+                <div class="form-group">
+                    <label>Add New Note / Payment Remark <span class="text-danger">*</span></label>
+                    <textarea id="modalNoteText" class="form-control" rows="2" placeholder="e.g. Bkash e 500 tk diche, baki 500 tk 25 tarike dibe"></textarea>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-4 form-group">
+                        <label>Paid Amount</label>
+                        <input type="number" step="0.01" id="modalNotePaid" class="form-control" placeholder="0.00">
+                    </div>
+                    <div class="col-md-4 form-group">
+                        <label>Remaining Due</label>
+                        <input type="number" step="0.01" id="modalNoteDue" class="form-control" placeholder="0.00">
+                    </div>
+                    <div class="col-md-4 form-group">
+                        <label>Promised Date</label>
+                        <input type="date" id="modalNotePromised" class="form-control">
+                    </div>
+                </div>
+
+                <button type="button" class="btn btn-primary btn-block" id="btnSaveNoteAjax" onclick="csmSaveNoteAjax()">
+                    <i class="fas fa-plus"></i> Save Note / Record Entry
+                </button>
+
+                <!-- Previous Notes History -->
+                <div style="margin-top:20px;">
+                    <h5 style="font-weight:800;color:#1e293b;border-bottom:1px solid #e2e8f0;padding-bottom:6px;">
+                        <i class="fas fa-history"></i> Previous Notes History
+                    </h5>
+                    <div id="modalNotesHistoryList" style="max-height:180px;overflow-y:auto;font-size:12px;margin-top:8px;">
+                        <p class="text-muted">Loading history...</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="background:#f8fafc;">
+                <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Custom Suspend Deadline (Grace Period) -->
+<div class="modal fade" id="csmLiveGraceModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-md" role="document">
+        <div class="modal-content" style="border-radius:8px;">
+            <div class="modal-header" style="background:#12589b;color:#fff;border-radius:7px 7px 0 0;">
+                <button type="button" class="close" data-dismiss="modal" style="color:#fff;">&times;</button>
+                <h4 class="modal-title"><i class="fas fa-clock-rotate-left"></i> Set Custom Suspend Deadline</h4>
+            </div>
+            <div class="modal-body" style="padding:20px;">
+                <div class="form-group">
+                    <label>Target Service / Domain:</label>
+                    <input type="text" id="liveGraceTarget" class="form-control" readonly style="background:#f8fafc;font-weight:700;">
+                    <input type="hidden" id="liveGraceServiceId" value="0">
+                </div>
+
+                <div class="form-group">
+                    <label>Custom Suspend Date (Grace Deadline) <span class="text-danger">*</span></label>
+                    <input type="date" id="liveGraceDate" class="form-control" required>
+                    <small class="help-block" style="color:#2563eb;">
+                        WHMCS <code>Next Due Date</code> will remain unchanged. Automatic suspension will be postponed until this date.
+                    </small>
+                </div>
+
+                <div class="form-group">
+                    <label>Reason / Extension Remark</label>
+                    <textarea id="liveGraceReason" class="form-control" rows="2" placeholder="e.g. Granted 7 days extension per client request"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer" style="background:#f8fafc;">
+                <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="csmSaveGraceAjax()"><i class="fas fa-save"></i> Save Deadline</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: WhatsApp Contact Message -->
 <div class="modal fade" id="csmQuickContactModal" tabindex="-1" role="dialog">
     <div class="modal-dialog" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <button type="button" class="close" data-dismiss="modal">&times;</button>
-                <h4 class="modal-title"><i class="fa-brands fa-whatsapp text-success"></i> Send WhatsApp Message</h4>
+        <div class="modal-content" style="border-radius:8px;">
+            <div class="modal-header" style="background:#16a34a;color:#fff;border-radius:7px 7px 0 0;">
+                <button type="button" class="close" data-dismiss="modal" style="color:#fff;">&times;</button>
+                <h4 class="modal-title"><i class="fa-brands fa-whatsapp"></i> Send WhatsApp Message</h4>
             </div>
-            <div class="modal-body">
+            <div class="modal-body" style="padding:20px;">
                 <div class="form-group">
                     <label>Recipient:</label>
                     <input type="text" id="modalClientInfo" class="form-control" readonly>
@@ -293,20 +362,11 @@ if (!defined("WHMCS")) {
                     <input type="text" id="modalPhoneNumber" class="form-control" readonly>
                 </div>
                 <div class="form-group">
-                    <label>Message Template:</label>
-                    <select id="modalTemplateSelect" class="form-control" onchange="csmApplyWhatsAppTemplate()">
-                        <option value="custom">Custom Message</option>
-                        <option value="due_reminder">Renewal Reminder Notice</option>
-                        <option value="overdue_notice">Service Overdue Notice</option>
-                        <option value="welcome">Active Service Confirmation</option>
-                    </select>
-                </div>
-                <div class="form-group">
                     <label>Message Text:</label>
                     <textarea id="modalMessageText" class="form-control" rows="4" placeholder="Type your WhatsApp message here..."></textarea>
                 </div>
             </div>
-            <div class="modal-footer">
+            <div class="modal-footer" style="background:#f8fafc;">
                 <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
                 <button type="button" class="btn btn-success" id="csmBtnSendWhatsApp">
                     <i class="fa-brands fa-whatsapp"></i> Open in WhatsApp
@@ -318,7 +378,7 @@ if (!defined("WHMCS")) {
 
 <script>
     var CSM_AJAX_URL = "<?php echo $modulelink; ?>&ajax=1";
-    var CSM_WARNING_DAYS = <?php echo $config_highlight_days; ?>;
-    var CSM_COUNTRY_CODE = "<?php echo $config_country_code; ?>";
+    var CSM_NOTE_URL = "<?php echo $modulelink; ?>&ajax=save_note";
+    var CSM_GET_NOTES_URL = "<?php echo $modulelink; ?>&ajax=get_notes";
 </script>
 <script src="../modules/addons/client_services_monitor/assets/js/app.js?v=<?php echo time(); ?>"></script>

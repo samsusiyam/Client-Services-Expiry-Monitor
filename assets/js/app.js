@@ -1,5 +1,6 @@
 /**
  * WHMCS Client Services & Expiry Monitor - JavaScript Controller
+ * Version: 2.0.0
  */
 
 (function ($) {
@@ -20,16 +21,11 @@
         searchDebounceTimer: null
     };
 
-    // Initialize on document ready
     $(document).ready(function () {
         initEventHandlers();
         csmLoadData();
-        setupAutoRefresh();
     });
 
-    /**
-     * Bind all DOM Event Handlers
-     */
     function initEventHandlers() {
         // Search Button
         $('#csmBtnSearch').on('click', function () {
@@ -56,7 +52,7 @@
             csmLoadData();
         });
 
-        // Filter dropdown immediate change trigger
+        // Filter dropdown immediate change
         $('#filterProductType, #filterProductId, #filterBillingCycle, #filterDueStatus, #filterServer, #filterPaymentMethod, #filterStatus').on('change', function () {
             csmState.page = 1;
             csmCollectFilters();
@@ -70,7 +66,7 @@
                 csmState.page = 1;
                 csmCollectFilters();
                 csmLoadData();
-            }, 350);
+            }, 300);
         });
 
         // Clear Keyword Button
@@ -90,22 +86,37 @@
             });
         });
 
-        // Records Per Page Change
+        // Per Page Change
         $('#csmPerPageSelect').on('change', function () {
             csmState.limit = parseInt($(this).val(), 10) || 50;
             csmState.page = 1;
             csmLoadData();
         });
 
-        // Auto-refresh select change
-        $('#csmAutoRefreshSelect').on('change', function () {
-            setupAutoRefresh();
+        // WhatsApp Modal Trigger
+        $(document).on('click', '.csm-btn-wa-modal', function (e) {
+            e.preventDefault();
+            var name = $(this).data('name');
+            var phone = $(this).data('phone');
+            var waUrl = $(this).data('waurl');
+
+            $('#modalClientInfo').val(name);
+            $('#modalPhoneNumber').val(phone);
+            $('#modalMessageText').val($(this).data('msg') || '');
+            $('#csmBtnSendWhatsApp').data('waurl', waUrl);
+            $('#csmQuickContactModal').modal('show');
         });
 
-        // Select All Checkbox
-        $('#csmSelectAll').on('change', function () {
-            var isChecked = $(this).is(':checked');
-            $('.csm-row-checkbox').prop('checked', isChecked);
+        // Send WhatsApp Button inside modal
+        $('#csmBtnSendWhatsApp').on('click', function () {
+            var waUrl = $(this).data('waurl');
+            var customText = $('#modalMessageText').val().trim();
+            if (waUrl) {
+                var baseUrl = waUrl.split('?')[0];
+                var finalUrl = baseUrl + '?text=' + encodeURIComponent(customText);
+                window.open(finalUrl, '_blank');
+            }
+            $('#csmQuickContactModal').modal('hide');
         });
 
         // Copy Phone Number
@@ -114,92 +125,26 @@
             var phone = $(this).data('phone');
             if (!phone || phone === 'N/A') return;
 
-            if (navigator.clipboard && window.isSecureContext) {
-                navigator.clipboard.writeText(phone);
-            } else {
-                var tempInput = document.createElement('input');
-                tempInput.value = phone;
-                document.body.appendChild(tempInput);
-                tempInput.select();
-                document.execCommand('copy');
-                document.body.removeChild(tempInput);
-            }
-
+            navigator.clipboard.writeText(phone);
             var $btn = $(this);
-            var originalHtml = $btn.html();
+            var orig = $btn.html();
             $btn.html('<i class="fa-solid fa-check text-success"></i>');
-            setTimeout(function () {
-                $btn.html(originalHtml);
-            }, 1500);
-        });
-
-        // WhatsApp Modal Trigger
-        $(document).on('click', '.csm-btn-wa-modal', function (e) {
-            e.preventDefault();
-            var name = $(this).data('name');
-            var phone = $(this).data('phone');
-            var product = $(this).data('product');
-            var duedate = $(this).data('duedate');
-            var waUrl = $(this).data('waurl');
-
-            $('#modalClientInfo').val(name + ' (' + product + ')');
-            $('#modalPhoneNumber').val(phone);
-            $('#csmBtnSendWhatsApp').data('waurl', waUrl);
-            $('#csmBtnSendWhatsApp').data('name', name);
-            $('#csmBtnSendWhatsApp').data('product', product);
-            $('#csmBtnSendWhatsApp').data('duedate', duedate);
-
-            csmApplyWhatsAppTemplate();
-            $('#csmQuickContactModal').modal('show');
-        });
-
-        // WhatsApp Modal Send Click
-        $('#csmBtnSendWhatsApp').on('click', function () {
-            var baseUrl = $(this).data('waurl');
-            var message = $('#modalMessageText').val();
-            if (baseUrl) {
-                var finalUrl = baseUrl + (baseUrl.indexOf('?') > -1 ? '&' : '?') + 'text=' + encodeURIComponent(message);
-                window.open(finalUrl, '_blank');
-                $('#csmQuickContactModal').modal('hide');
-            }
+            setTimeout(function () { $btn.html(orig); }, 1500);
         });
     }
 
-    /**
-     * Collect all filter inputs into state
-     */
     function csmCollectFilters() {
-        csmState.product_type = $('#filterProductType').val();
-        csmState.product_id = $('#filterProductId').val();
-        csmState.billing_cycle = $('#filterBillingCycle').val();
-        csmState.status = $('#filterStatus').val();
-        csmState.server_id = $('#filterServer').val();
-        csmState.payment_method = $('#filterPaymentMethod').val();
-        csmState.due_filter = $('#filterDueStatus').val();
-        csmState.search = $('#filterKeyword').val();
+        csmState.product_type = $('#filterProductType').val() || '';
+        csmState.product_id = parseInt($('#filterProductId').val(), 10) || 0;
+        csmState.billing_cycle = $('#filterBillingCycle').val() || 'Any';
+        csmState.status = $('#filterStatus').val() || 'Active';
+        csmState.server_id = parseInt($('#filterServer').val(), 10) || 0;
+        csmState.payment_method = $('#filterPaymentMethod').val() || 'Any';
+        csmState.due_filter = $('#filterDueStatus').val() || '';
+        csmState.search = $('#filterKeyword').val() || '';
         csmState.limit = parseInt($('#csmPerPageSelect').val(), 10) || 50;
     }
 
-    /**
-     * Setup Auto-Refresh Interval
-     */
-    function setupAutoRefresh() {
-        if (csmState.autoRefreshTimer) {
-            clearInterval(csmState.autoRefreshTimer);
-            csmState.autoRefreshTimer = null;
-        }
-
-        var intervalSecs = parseInt($('#csmAutoRefreshSelect').val(), 10) || 0;
-        if (intervalSecs > 0) {
-            csmState.autoRefreshTimer = setInterval(function () {
-                csmLoadData();
-            }, intervalSecs * 1000);
-        }
-    }
-
-    /**
-     * Quick filter by Due Card click
-     */
     window.csmSetDueFilter = function (filterVal) {
         $('#filterDueStatus').val(filterVal);
         csmState.due_filter = filterVal;
@@ -207,30 +152,6 @@
         csmLoadData();
     };
 
-    /**
-     * WhatsApp Template Generator
-     */
-    window.csmApplyWhatsAppTemplate = function () {
-        var template = $('#modalTemplateSelect').val();
-        var name = $('#csmBtnSendWhatsApp').data('name') || 'Client';
-        var product = $('#csmBtnSendWhatsApp').data('product') || 'Service';
-        var duedate = $('#csmBtnSendWhatsApp').data('duedate') || '';
-
-        var msg = '';
-        if (template === 'due_reminder') {
-            msg = 'Dear ' + name + ', your service ' + product + ' is scheduled for renewal on ' + duedate + '. Please renew your service to ensure uninterrupted operation. Thank you - Bahari IT';
-        } else if (template === 'overdue_notice') {
-            msg = 'Dear ' + name + ', your service ' + product + ' expired on ' + duedate + ' and is currently overdue. Please pay your pending invoice promptly to avoid suspension. Thank you - Bahari IT';
-        } else if (template === 'welcome') {
-            msg = 'Dear ' + name + ', your service ' + product + ' is active and running smoothly. Please feel free to reach out if you need any assistance. Thank you - Bahari IT';
-        }
-
-        $('#modalMessageText').val(msg);
-    };
-
-    /**
-     * Load Data via AJAX
-     */
     function csmLoadData(callback) {
         var params = {
             product_type: csmState.product_type,
@@ -254,9 +175,9 @@
                 if (response && response.success) {
                     renderTable(response.records);
                     renderPagination(response);
-                    updateCounters(response);
+                    updateCounters(response.stats);
                 } else {
-                    renderError(response.error || 'Failed to load records.');
+                    renderError(response.error || 'Failed to load services.');
                 }
                 if (typeof callback === 'function') callback();
             },
@@ -267,269 +188,263 @@
         });
     }
 
-    /**
-     * Render Table Rows
-     */
     function renderTable(records) {
         var $tbody = $('#csmTableBody');
         $tbody.empty();
-        $('#csmSelectAll').prop('checked', false);
 
         if (!records || records.length === 0) {
             $tbody.html(
-                '<tr><td colspan="11" class="text-center csm-empty-state">' +
-                '<i class="fa-solid fa-folder-open"></i>' +
-                '<p>No services or records found matching your filters.</p>' +
+                '<tr><td colspan="11" class="text-center" style="padding:40px;color:#64748b;">' +
+                '<i class="fa-solid fa-folder-open" style="font-size:32px;margin-bottom:8px;opacity:0.5;display:block;"></i>' +
+                '<p>No services found matching the selected filters.</p>' +
                 '</td></tr>'
             );
             return;
         }
 
         var rowsHtml = '';
-        $.each(records, function (index, item) {
-            var rowClass = (item.days_left !== null && item.days_left <= 0) ? 'row-overdue' : '';
-
-            // Sub meta tags (Order, Reg Date, Server, IP, Username)
-            var subMeta = '<div class="csm-sub-meta">';
-            if (item.orderid) {
-                subMeta += '<span class="csm-meta-tag"><strong>Order:</strong> #' + escapeHtml(item.orderid) + '</span>';
-            }
-            if (item.regdate && item.regdate !== '-') {
-                subMeta += '<span class="csm-meta-tag"><i class="fa-regular fa-calendar"></i> ' + escapeHtml(item.regdate) + '</span>';
-            }
-            if (item.server_name) {
-                subMeta += '<span class="csm-meta-tag"><i class="fa-solid fa-server"></i> ' + escapeHtml(item.server_name) + '</span>';
-            }
-            if (item.dedicatedip) {
-                subMeta += '<span class="csm-meta-tag"><i class="fa-solid fa-network-wired"></i> ' + escapeHtml(item.dedicatedip) + '</span>';
-            }
-            if (item.username) {
-                subMeta += '<span class="csm-meta-tag"><i class="fa-regular fa-user"></i> ' + escapeHtml(item.username) + '</span>';
-            }
-            subMeta += '</div>';
-
-            // Type pill badge
-            var typeClass = 'type-other';
-            if (item.product_type === 'server') typeClass = 'type-server';
-            else if (item.product_type === 'hostingaccount') typeClass = 'type-hosting';
-            else if (item.product_type === 'reselleraccount') typeClass = 'type-reseller';
-            else if (item.record_type === 'domain') typeClass = 'type-domain';
-            var typePill = '<span class="csm-type-pill ' + typeClass + '">' + escapeHtml(item.type_label) + '</span>';
-
-            // Domain link
-            var domainHtml = '<span class="text-muted">-</span>';
-            if (item.domain) {
-                var cleanDom = escapeHtml(item.domain);
-                domainHtml = '<a href="http://' + cleanDom + '" target="_blank" class="csm-domain-link">' +
-                    '<i class="fa-solid fa-globe text-muted"></i> ' + cleanDom +
-                    '</a>' +
-                    '<a href="http://www.' + cleanDom + '" target="_blank" class="csm-www-btn" title="Open with www">WWW</a>';
+        $.each(records, function (idx, item) {
+            // Due badge
+            var dueBadge = '';
+            if (item.expiry_status === 'overdue') {
+                dueBadge = '<span class="csm-badge csm-badge-overdue">' + Math.abs(item.days_left) + 'd Overdue</span>';
+            } else if (item.expiry_status === 'today') {
+                dueBadge = '<span class="csm-badge csm-badge-warning">Due Today</span>';
+            } else if (item.expiry_status === 'warning') {
+                dueBadge = '<span class="csm-badge csm-badge-warning">' + item.days_left + 'd Left</span>';
+            } else if (item.days_left !== null) {
+                dueBadge = '<small class="text-muted">' + item.days_left + 'd left</small>';
             }
 
-            // Contact & WhatsApp button (Clean formatted phone without dots)
+            // WhatsApp / Phone
             var phoneHtml = '<span class="text-muted">N/A</span>';
-            if (item.phonenumber && item.phonenumber !== 'N/A') {
-                var cleanDisplayPhone = escapeHtml(item.phonenumber);
-                var waBtn = '';
-                if (item.whatsapp_url) {
-                    waBtn = '<button type="button" class="csm-btn-wa csm-btn-wa-modal" ' +
-                        'data-name="' + escapeHtml(item.client_name) + '" ' +
-                        'data-phone="' + cleanDisplayPhone + '" ' +
-                        'data-product="' + escapeHtml(item.product_name) + '" ' +
-                        'data-duedate="' + escapeHtml(item.nextduedate) + '" ' +
-                        'data-waurl="' + escapeHtml(item.whatsapp_url) + '" title="Chat on WhatsApp">' +
-                        '<i class="fa-brands fa-whatsapp"></i> WhatsApp' +
-                        '</button>';
-                }
-
-                var callBtn = item.dial_url ? '<a href="' + escapeHtml(item.dial_url) + '" class="csm-btn-dial" title="Direct Phone Call"><i class="fa-solid fa-phone"></i> Call</a>' : '';
-                var copyBtn = '<button type="button" class="csm-btn-copy-num csm-btn-copy" data-phone="' + cleanDisplayPhone + '" title="Copy Number"><i class="fa-regular fa-copy"></i></button>';
-
-                phoneHtml = '<div class="csm-phone-box">' +
-                    '<span class="csm-phone-badge"><i class="fa-solid fa-phone-volume text-primary"></i> ' + cleanDisplayPhone + '</span>' +
-                    '<div class="csm-contact-actions">' + waBtn + callBtn + copyBtn + '</div>' +
-                    '</div>';
+            if (item.phone && item.phone !== 'N/A') {
+                var waBtn = item.wa_url ? '<button class="btn btn-success btn-xs csm-btn-wa-modal" data-name="' + escapeHtml(item.client_name) + '" data-phone="' + escapeHtml(item.phone) + '" data-waurl="' + escapeHtml(item.wa_url) + '" title="WhatsApp Reminder"><i class="fab fa-whatsapp"></i></button>' : '';
+                var copyBtn = '<button class="btn btn-default btn-xs csm-btn-copy" data-phone="' + escapeHtml(item.phone) + '" title="Copy"><i class="far fa-copy"></i></button>';
+                phoneHtml = '<div style="font-size:12px;font-weight:600;">' + escapeHtml(item.phone) + '</div><div style="margin-top:2px;display:flex;gap:4px;">' + waBtn + copyBtn + '</div>';
             }
 
-            // Price & Payment
-            var priceHtml = '<div class="csm-price-box">' + escapeHtml(item.price_formatted) + '</div>' +
-                '<div class="csm-sub-meta"><span class="csm-meta-tag">' + escapeHtml(item.paymentmethod) + '</span></div>';
-
-            // Due Date & Modern Pill Badge
-            var pillClass = 'pill-normal';
-            var pillIcon = '<i class="fa-regular fa-calendar-check"></i>';
-            if (item.days_left !== null) {
-                if (item.days_left < 0) {
-                    pillClass = 'pill-overdue';
-                    pillIcon = '<i class="fa-solid fa-circle-exclamation"></i>';
-                } else if (item.days_left === 0) {
-                    pillClass = 'pill-today';
-                    pillIcon = '<i class="fa-solid fa-bolt"></i>';
-                } else if (item.days_left <= CSM_WARNING_DAYS) {
-                    pillClass = 'pill-warning';
-                    pillIcon = '<i class="fa-solid fa-hourglass-half"></i>';
-                }
+            // Grace Suspend Column
+            var graceHtml = '';
+            if (item.grace_date) {
+                graceHtml = '<span class="label label-primary" style="font-size:11px;" title="' + escapeHtml(item.grace_reason || 'Extension granted') + '"><i class="fas fa-clock"></i> ' + escapeHtml(item.grace_date) + '</span> ' +
+                    '<button class="btn btn-default btn-xs" onclick="openLiveGraceModal(' + item.id + ', \'' + escapeHtml(addslashes(item.product_name + ' - ' + (item.domain || item.client_name))) + '\', \'' + escapeHtml(item.next_due_date) + '\')" title="Edit Deadline"><i class="fas fa-edit"></i></button>';
+            } else {
+                graceHtml = '<button class="btn btn-default btn-xs" onclick="openLiveGraceModal(' + item.id + ', \'' + escapeHtml(addslashes(item.product_name + ' - ' + (item.domain || item.client_name))) + '\', \'' + escapeHtml(item.next_due_date) + '\')" title="Set Custom Grace Suspend Date"><i class="fas fa-plus"></i> Grace</button>';
             }
 
-            var dueHtml = '<div class="csm-due-box">' +
-                '<span class="csm-due-date"><i class="fa-regular fa-calendar text-muted"></i> ' + escapeHtml(item.nextduedate) + '</span>' +
-                '<span class="csm-pill-badge ' + pillClass + '">' + pillIcon + ' ' + escapeHtml(item.due_badge_text) + '</span>' +
-                '</div>';
+            // Due Note / হিসাব Column
+            var noteHtml = '';
+            if (item.latest_note) {
+                noteHtml = '<span class="label label-info" style="font-size:11px;" title="' + escapeHtml(item.latest_note) + '"><i class="fas fa-note-sticky"></i> ' + escapeHtml(item.latest_note.substring(0, 16)) + '...</span> ' +
+                    '<button class="btn btn-default btn-xs" onclick="openNoteModal(\'service\', ' + item.id + ', \'' + escapeHtml(addslashes(item.product_name + ' (#' + item.id + ')')) + '\', ' + item.price + ')" title="View/Add Note"><i class="fas fa-pen"></i></button>';
+            } else {
+                noteHtml = '<button class="btn btn-default btn-xs" onclick="openNoteModal(\'service\', ' + item.id + ', \'' + escapeHtml(addslashes(item.product_name + ' (#' + item.id + ')')) + '\', ' + item.price + ')" title="Add Due Note / হিসাব"><i class="fas fa-plus"></i> হিসাব</button>';
+            }
 
-            // Status Pill
-            var statusLower = item.status.toLowerCase();
-            var statusClass = 'status-' + statusLower;
-            var statusHtml = '<span class="status-pill ' + statusClass + '">' + escapeHtml(item.status) + '</span>';
+            // Domain Link
+            var domainHtml = item.domain ? '<a href="http://' + escapeHtml(item.domain) + '" target="_blank" style="color:#1d4ed8;font-weight:600;"><i class="fas fa-globe"></i> ' + escapeHtml(item.domain) + '</a>' : '<span class="text-muted">—</span>';
 
-            // Action Links
-            var actionHtml = '<a href="' + escapeHtml(item.service_url) + '" class="btn btn-default btn-sm" title="Manage Service / Product" target="_blank">' +
-                '<i class="fa-solid fa-arrow-up-right-from-square text-primary"></i>' +
-                '</a>';
+            var statusClass = item.status === 'Active' ? 'active' : (item.status === 'Suspended' ? 'suspended' : 'warning');
 
-            rowsHtml += '<tr class="' + rowClass + '">' +
-                '<td class="text-center"><input type="checkbox" class="csm-row-checkbox" value="' + item.id + '"></td>' +
-                '<td><a href="' + escapeHtml(item.service_url) + '" class="csm-item-title font-weight-bold" target="_blank">#' + item.id + '</a></td>' +
-                '<td>' +
-                    '<div><a href="' + escapeHtml(item.service_url) + '" class="csm-item-title" target="_blank">' + escapeHtml(item.product_name) + '</a>' + typePill + '</div>' +
-                    subMeta +
-                '</td>' +
+            rowsHtml += '<tr>' +
+                '<td><strong>#' + item.id + '</strong></td>' +
+                '<td><strong>' + escapeHtml(item.product_name) + '</strong>' + (item.server_name ? '<br><small class="text-muted"><i class="fas fa-server"></i> ' + escapeHtml(item.server_name) + '</small>' : '') + '</td>' +
                 '<td>' + domainHtml + '</td>' +
-                '<td>' +
-                    '<a href="' + escapeHtml(item.client_url) + '" class="csm-client-link" target="_blank"><i class="fa-regular fa-user text-muted"></i> ' + escapeHtml(item.client_name) + '</a>' +
-                    (item.company_name ? '<div class="csm-sub-meta">' + escapeHtml(item.company_name) + '</div>' : '') +
-                '</td>' +
+                '<td><a href="clientssummary.php?userid=' + item.userid + '" target="_blank" style="font-weight:700;color:#0f5ea8;">' + escapeHtml(item.client_name) + '</a>' + (item.company ? '<br><small class="text-muted">' + escapeHtml(item.company) + '</small>' : '') + '</td>' +
                 '<td>' + phoneHtml + '</td>' +
-                '<td>' + priceHtml + '</td>' +
-                '<td><span class="csm-meta-tag font-weight-bold">' + escapeHtml(item.billingcycle) + '</span></td>' +
-                '<td>' + dueHtml + '</td>' +
-                '<td>' + statusHtml + '</td>' +
-                '<td class="text-center">' + actionHtml + '</td>' +
+                '<td><strong>' + escapeHtml(item.formatted_price) + '</strong><br><small class="text-muted">' + escapeHtml(item.billing_cycle) + '</small></td>' +
+                '<td><strong>' + escapeHtml(item.next_due_date) + '</strong><br>' + dueBadge + '</td>' +
+                '<td>' + graceHtml + '</td>' +
+                '<td>' + noteHtml + '</td>' +
+                '<td><span class="csm-badge csm-badge-' + statusClass + '">' + escapeHtml(item.status) + '</span></td>' +
+                '<td class="text-center">' +
+                '<a href="clientsservices.php?id=' + item.id + '" target="_blank" class="btn btn-default btn-xs" title="View Service"><i class="fas fa-external-link-alt"></i></a> ' +
+                '<a href="dologin.php?userid=' + item.userid + '" target="_blank" class="btn btn-default btn-xs" title="Login as Client"><i class="fas fa-right-to-bracket"></i></a>' +
+                '</td>' +
                 '</tr>';
         });
 
         $tbody.html(rowsHtml);
     }
 
-    /**
-     * Render Pagination Controls
-     */
     function renderPagination(data) {
-        var countText = 'Showing ' + data.showing_from + ' to ' + data.showing_to + ' of ' + data.total + ' Records Found';
-        $('#csmRecordCountText').text(countText);
+        var total = data.total || 0;
+        var page = data.page || 1;
+        var limit = data.limit || 50;
+        var totalPages = Math.ceil(total / limit);
 
-        var paginationHtml = '';
-        if (data.total_pages > 1) {
-            paginationHtml = '<ul class="csm-pagination-list">';
+        $('#csmRecordCountText').html('Showing <strong>' + ((page - 1) * limit + 1) + '</strong> to <strong>' + Math.min(page * limit, total) + '</strong> of <strong>' + total + '</strong> Services');
 
-            // Prev Button
-            if (data.page > 1) {
-                paginationHtml += '<li><a href="javascript:void(0);" onclick="csmGoToPage(' + (data.page - 1) + ')">&laquo; Prev</a></li>';
-            } else {
-                paginationHtml += '<li class="disabled"><span>&laquo; Prev</span></li>';
-            }
-
-            // Page numbers
-            var startPage = Math.max(1, data.page - 2);
-            var endPage = Math.min(data.total_pages, data.page + 2);
-
-            if (startPage > 1) {
-                paginationHtml += '<li><a href="javascript:void(0);" onclick="csmGoToPage(1)">1</a></li>';
-                if (startPage > 2) paginationHtml += '<li class="disabled"><span>...</span></li>';
-            }
-
-            for (var p = startPage; p <= endPage; p++) {
-                if (p === data.page) {
-                    paginationHtml += '<li class="active"><span>' + p + '</span></li>';
-                } else {
-                    paginationHtml += '<li><a href="javascript:void(0);" onclick="csmGoToPage(' + p + ')">' + p + '</a></li>';
-                }
-            }
-
-            if (endPage < data.total_pages) {
-                if (endPage < data.total_pages - 1) paginationHtml += '<li class="disabled"><span>...</span></li>';
-                paginationHtml += '<li><a href="javascript:void(0);" onclick="csmGoToPage(' + data.total_pages + ')">' + data.total_pages + '</a></li>';
-            }
-
-            // Next Button
-            if (data.page < data.total_pages) {
-                paginationHtml += '<li><a href="javascript:void(0);" onclick="csmGoToPage(' + (data.page + 1) + ')">Next &raquo;</a></li>';
-            } else {
-                paginationHtml += '<li class="disabled"><span>Next &raquo;</span></li>';
-            }
-
-            paginationHtml += '</ul>';
+        if (totalPages <= 1) {
+            $('#csmPaginationBottom').empty();
+            return;
         }
 
-        $('#csmPaginationTop').html(paginationHtml);
-        $('#csmPaginationBottom').html(paginationHtml);
+        var html = '<ul class="pagination pagination-sm" style="margin:0;">';
+        if (page > 1) {
+            html += '<li><a href="javascript:void(0)" onclick="csmGoToPage(' + (page - 1) + ')">&laquo; Prev</a></li>';
+        }
+
+        var startP = Math.max(1, page - 3);
+        var endP = Math.min(totalPages, page + 3);
+        for (var p = startP; p <= endP; p++) {
+            html += '<li class="' + (p === page ? 'active' : '') + '"><a href="javascript:void(0)" onclick="csmGoToPage(' + p + ')">' + p + '</a></li>';
+        }
+
+        if (page < totalPages) {
+            html += '<li><a href="javascript:void(0)" onclick="csmGoToPage(' + (page + 1) + ')">Next &raquo;</a></li>';
+        }
+        html += '</ul>';
+
+        $('#csmPaginationBottom').html(html);
     }
 
-    /**
-     * Jump to page
-     */
-    window.csmGoToPage = function (page) {
-        csmState.page = page;
+    window.csmGoToPage = function (p) {
+        csmState.page = p;
         csmLoadData();
-        $('html, body').animate({ scrollTop: $('#csmServicesTable').offset().top - 100 }, 200);
+        $('html, body').animate({ scrollTop: $('#csmServicesTable').offset().top - 120 }, 200);
     };
 
-    /**
-     * Update metric counters
-     */
-    function updateCounters(data) {
-        // Calculate quick metric badges from records
-        var todayCount = 0;
-        var due3Count = 0;
-        var due7Count = 0;
-        var overdueCount = 0;
-
-        if (data.records) {
-            $.each(data.records, function (i, r) {
-                if (r.days_left !== null) {
-                    if (r.days_left < 0) overdueCount++;
-                    else if (r.days_left === 0) todayCount++;
-                    else if (r.days_left <= 3) due3Count++;
-                    else if (r.days_left <= 7) due7Count++;
-                }
-            });
-        }
-
-        $('#statTotalActive').text(data.total);
-        if (data.due_filter === 'today') $('#statDueToday').text(data.total);
-        else if (data.due_filter === '3days') $('#statDue3Days').text(data.total);
-        else if (data.due_filter === '7days') $('#statDue7Days').text(data.total);
-        else if (data.due_filter === 'overdue') $('#statOverdue').text(data.total);
-        else {
-            $('#statDueToday').text(todayCount + '+');
-            $('#statDue3Days').text(due3Count + '+');
-            $('#statDue7Days').text(due7Count + '+');
-            $('#statOverdue').text(overdueCount + '+');
-        }
+    function updateCounters(stats) {
+        if (!stats) return;
+        $('#statTotalActive').text(stats.total_active || 0);
+        $('#statDueToday').text(stats.due_today || 0);
+        $('#statDue3Days').text(stats.due_3days || 0);
+        $('#statDue7Days').text(stats.due_7days || 0);
+        $('#statOverdue').text(stats.overdue || 0);
     }
 
-    /**
-     * Render Error in table
-     */
     function renderError(msg) {
-        $('#csmTableBody').html(
-            '<tr><td colspan="11" class="text-center text-danger csm-loading-state">' +
-            '<i class="fa-solid fa-triangle-exclamation fa-2x"></i>' +
-            '<p class="mt-2">' + escapeHtml(msg) + '</p>' +
-            '</td></tr>'
-        );
+        $('#csmTableBody').html('<tr><td colspan="11" class="text-center text-danger" style="padding:30px;">' + escapeHtml(msg) + '</td></tr>');
     }
 
-    /**
-     * HTML entity escaper
-     */
     function escapeHtml(str) {
-        if (str === null || str === undefined) return '';
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#039;');
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
+
+    function addslashes(str) {
+        return (str + '').replace(/[\\"']/g, '\\$&').replace(/\u0000/g, '\\0');
+    }
+
+    // Modal: Note Management
+    window.openNoteModal = function (relType, relId, targetName, dueAmount) {
+        $('#modalNoteRelType').val(relType);
+        $('#modalNoteRelId').val(relId);
+        $('#modalNoteTarget').val(targetName);
+        $('#modalNoteText').val('');
+        $('#modalNotePaid').val('');
+        $('#modalNoteDue').val(dueAmount || '');
+        $('#modalNotePromised').val('');
+        $('#modalNotesHistoryList').html('<p class="text-muted">Loading history...</p>');
+
+        // Fetch previous notes history
+        $.ajax({
+            url: CSM_GET_NOTES_URL + '&rel_type=' + encodeURIComponent(relType) + '&rel_id=' + encodeURIComponent(relId),
+            type: 'GET',
+            dataType: 'json',
+            success: function (res) {
+                if (res && res.success && res.notes && res.notes.length > 0) {
+                    var histHtml = '';
+                    res.notes.forEach(function (n) {
+                        histHtml += '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px;margin-bottom:6px;">' +
+                            '<div style="font-weight:700;color:#1e293b;">' + escapeHtml(n.note) + '</div>' +
+                            '<div style="font-size:11px;color:#64748b;margin-top:2px;">' +
+                            (n.paid_amount ? '<span style="color:#16a34a;">Paid: ' + n.paid_amount + '</span> &bull; ' : '') +
+                            (n.due_amount ? '<span style="color:#dc2626;">Due: ' + n.due_amount + '</span> &bull; ' : '') +
+                            (n.promised_date ? '<span>Promised: ' + n.promised_date + '</span> &bull; ' : '') +
+                            '<span>' + n.created_at + ' (' + escapeHtml(n.admin_name || 'Admin') + ')</span>' +
+                            '</div></div>';
+                    });
+                    $('#modalNotesHistoryList').html(histHtml);
+                } else {
+                    $('#modalNotesHistoryList').html('<p class="text-muted">No previous notes recorded.</p>');
+                }
+            }
+        });
+
+        $('#csmNoteModal').modal('show');
+    };
+
+    window.csmSaveNoteAjax = function () {
+        var relType = $('#modalNoteRelType').val();
+        var relId = $('#modalNoteRelId').val();
+        var note = $('#modalNoteText').val().trim();
+        var paid = $('#modalNotePaid').val();
+        var due = $('#modalNoteDue').val();
+        var promised = $('#modalNotePromised').val();
+
+        if (!note) {
+            alert('Please enter a note / remark text.');
+            return;
+        }
+
+        $('#btnSaveNoteAjax').prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Saving...');
+
+        $.ajax({
+            url: CSM_NOTE_URL,
+            type: 'POST',
+            data: {
+                rel_type: relType,
+                rel_id: relId,
+                note: note,
+                paid_amount: paid,
+                due_amount: due,
+                promised_date: promised
+            },
+            dataType: 'json',
+            success: function (res) {
+                $('#btnSaveNoteAjax').prop('disabled', false).html('<i class="fas fa-plus"></i> Save Note / Record Entry');
+                if (res && res.success) {
+                    $('#csmNoteModal').modal('hide');
+                    csmLoadData();
+                } else {
+                    alert('Error: ' + (res.error || 'Failed to save note.'));
+                }
+            },
+            error: function () {
+                $('#btnSaveNoteAjax').prop('disabled', false).html('<i class="fas fa-plus"></i> Save Note / Record Entry');
+                alert('Network error while saving note.');
+            }
+        });
+    };
+
+    // Modal: Live Grace Period
+    window.openLiveGraceModal = function (serviceId, targetName, currentDueDate) {
+        $('#liveGraceServiceId').val(serviceId);
+        $('#liveGraceTarget').val(targetName + ' (WHMCS Due: ' + currentDueDate + ')');
+        $('#liveGraceDate').val('');
+        $('#liveGraceReason').val('');
+        $('#csmLiveGraceModal').modal('show');
+    };
+
+    window.csmSaveGraceAjax = function () {
+        var serviceId = $('#liveGraceServiceId').val();
+        var graceDate = $('#liveGraceDate').val();
+        var reason = $('#liveGraceReason').val().trim();
+
+        if (!graceDate) {
+            alert('Please select a custom grace suspend date.');
+            return;
+        }
+
+        $.ajax({
+            url: '?module=client_services_monitor&action=save_grace_suspend',
+            type: 'POST',
+            data: {
+                service_id: serviceId,
+                grace_suspend_date: graceDate,
+                reason: reason
+            },
+            success: function () {
+                $('#csmLiveGraceModal').modal('hide');
+                csmLoadData();
+            },
+            error: function () {
+                alert('Error saving suspension grace deadline.');
+            }
+        });
+    };
 
 })(jQuery);
