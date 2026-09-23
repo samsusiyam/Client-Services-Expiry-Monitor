@@ -632,36 +632,136 @@ if (!function_exists('csm_shared_css')) {
                 .csm-stats, .csm-check-grid { grid-template-columns: 1fr; }
                 .csm-nav-btn { width: 100%; justify-content: center; }
             }
-            .select2-container--default .select2-selection--multiple {
-                border: 1px solid #cbd5e1;
-                border-radius: 6px;
-                min-height: 38px;
-                padding: 2px 6px;
-            }
-            .select2-container--default.select2-container--focus .select2-selection--multiple {
-                border-color: #1267b3;
-            }
-            .select2-container--default .select2-selection--multiple .select2-selection__choice {
-                background-color: #12589b;
-                border: 1px solid #0f4b85;
-                color: #fff;
-                border-radius: 4px;
-                padding: 2px 8px;
-                font-size: 12px;
-                font-weight: 600;
-            }
-            .select2-container--default .select2-selection--multiple .select2-selection__choice__remove {
-                color: #fff;
-                margin-right: 5px;
-            }
-            .select2-dropdown {
-                border: 1px solid #cbd5e1;
-                border-radius: 6px;
-                box-shadow: 0 10px 25px rgba(0,0,0,0.1);
-                z-index: 999999;
-            }
         </style>
         <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+        <style>
+            /* Modern Select2 UI for CSM */
+            .select2-container {
+                width: 100% !important;
+            }
+            .select2-container--default .select2-selection--multiple {
+                background-color: #ffffff !important;
+                border: 1.5px solid #cbd5e1 !important;
+                border-radius: 8px !important;
+                min-height: 48px !important;
+                padding: 4px 8px !important;
+                display: flex !important;
+                flex-wrap: wrap !important;
+                align-items: center !important;
+                gap: 4px !important;
+                box-shadow: inset 0 1px 2px rgba(0,0,0,0.03) !important;
+                box-sizing: border-box !important;
+            }
+            .select2-container--default.select2-container--focus .select2-selection--multiple {
+                border-color: #0284c7 !important;
+                box-shadow: 0 0 0 3px rgba(2,132,199,0.15) !important;
+                outline: none !important;
+            }
+            .select2-container--default .select2-selection--multiple .select2-selection__rendered {
+                display: flex !important;
+                flex-wrap: wrap !important;
+                align-items: center !important;
+                gap: 5px !important;
+                padding: 0 !important;
+                margin: 0 !important;
+                width: 100% !important;
+            }
+            .select2-container--default .select2-selection--multiple .select2-selection__choice {
+                background: #e0f2fe !important;
+                border: 1px solid #7dd3fc !important;
+                border-radius: 20px !important;
+                color: #0369a1 !important;
+                font-size: 12.5px !important;
+                font-weight: 700 !important;
+                padding: 4px 12px 4px 10px !important;
+                margin: 2px !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                line-height: 1.3 !important;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
+            }
+            .select2-container--default .select2-selection--multiple .select2-selection__choice span,
+            .select2-container--default .select2-selection--multiple .select2-selection__choice {
+                color: #0369a1 !important;
+            }
+            .select2-container--default .select2-selection--multiple .select2-selection__choice__remove {
+                color: #ef4444 !important;
+                font-size: 16px !important;
+                font-weight: 900 !important;
+                margin-right: 6px !important;
+                cursor: pointer !important;
+                border: none !important;
+                background: transparent !important;
+                display: inline-flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                line-height: 1 !important;
+                transition: color 0.15s ease !important;
+            }
+            .select2-container--default .select2-selection--multiple .select2-selection__choice__remove:hover {
+                color: #b91c1c !important;
+                background: transparent !important;
+            }
+            .select2-container--default .select2-selection--multiple .select2-search--inline {
+                flex-grow: 1 !important;
+                margin: 2px 4px !important;
+            }
+            .select2-container--default .select2-selection--multiple .select2-search--inline .select2-search__field {
+                margin: 0 !important;
+                padding: 4px 6px !important;
+                font-size: 13px !important;
+                color: #1e293b !important;
+                height: 30px !important;
+                width: 100% !important;
+                border: none !important;
+                outline: none !important;
+                background: transparent !important;
+            }
+            .select2-dropdown {
+                border: 1px solid #cbd5e1 !important;
+                border-radius: 8px !important;
+                box-shadow: 0 12px 30px rgba(15,23,42,0.15) !important;
+                overflow: hidden !important;
+                z-index: 10500 !important;
+            }
+            .select2-container--default .select2-results__option {
+                padding: 8px 12px !important;
+                font-size: 13px !important;
+                color: #334155 !important;
+                border-bottom: 1px solid #f1f5f9 !important;
+            }
+            .select2-container--default .select2-results__option--highlighted[aria-selected] {
+                background-color: #0284c7 !important;
+                color: #ffffff !important;
+            }
+            .select2-container--default .select2-results__option--highlighted[aria-selected] * {
+                color: #ffffff !important;
+            }
+            .select2-container--default .select2-results__option[aria-selected=true] {
+                background-color: #f0fdf4 !important;
+                color: #166534 !important;
+            }
+            .select2-container--default .select2-selection--single {
+                height: 44px !important;
+                border: 1.5px solid #cbd5e1 !important;
+                border-radius: 8px !important;
+                padding: 6px 12px !important;
+                background-color: #ffffff !important;
+                display: flex !important;
+                align-items: center !important;
+            }
+            .select2-container--default .select2-selection--single .select2-selection__rendered {
+                line-height: 30px !important;
+                color: #1e293b !important;
+                font-size: 13px !important;
+                font-weight: 600 !important;
+                padding-left: 0 !important;
+            }
+            .select2-container--default .select2-selection--single .select2-selection__arrow {
+                height: 42px !important;
+                right: 8px !important;
+            }
+        </style>
         <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
         <script>
@@ -1290,10 +1390,16 @@ if (!function_exists('csm_render_custom_customers_page')) {
         if (!empty($allClients)) {
             foreach ($allClients as $cl) {
                 $phoneClean = str_replace('.', ' ', $cl->phonenumber ?: '');
-                $compClean = $cl->companyname ? ' (' . $cl->companyname . ')' : '';
+                $compClean = $cl->companyname ?: '';
+                $fullName = trim($cl->firstname . ' ' . $cl->lastname);
                 $isAlreadyMonitored = in_array((int)$cl->id, $monitoredUserIds, true);
-                $clientPickerOptionsHtml .= '<option value="' . $cl->id . '"' . ($isAlreadyMonitored ? ' selected' : '') . '>'
-                    . '#' . $cl->id . ' - ' . csm_h(trim($cl->firstname . ' ' . $cl->lastname)) . csm_h($compClean) . ' - ' . csm_h($cl->email) . ($phoneClean ? ' | ' . csm_h($phoneClean) : '')
+                $clientPickerOptionsHtml .= '<option value="' . $cl->id . '"'
+                    . ' data-name="' . csm_h($fullName) . '"'
+                    . ' data-company="' . csm_h($compClean) . '"'
+                    . ' data-email="' . csm_h($cl->email ?: '') . '"'
+                    . ' data-phone="' . csm_h($phoneClean) . '"'
+                    . ($isAlreadyMonitored ? ' selected' : '') . '>'
+                    . '#' . $cl->id . ' - ' . csm_h($fullName) . ($compClean ? ' (' . csm_h($compClean) . ')' : '') . ' - ' . csm_h($cl->email) . ($phoneClean ? ' | ' . csm_h($phoneClean) : '')
                     . '</option>';
             }
         }
@@ -1556,18 +1662,60 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
         $(document).ready(function() {
             if ($.fn.select2) {
+                function csmFormatClientOption(state) {
+                    if (!state.id) return state.text;
+                    var $el = $(state.element);
+                    var name = $el.data("name") || state.text;
+                    var company = $el.data("company") || "";
+                    var email = $el.data("email") || "";
+                    var phone = $el.data("phone") || "";
+                    var id = state.id;
+
+                    var compHtml = company ? " <span style=\"font-size:11px;color:#64748b;font-weight:normal;\">(" + $("<div>").text(company).html() + ")</span>" : "";
+                    var emailHtml = email ? "<i class=\"fas fa-envelope\" style=\"font-size:10px;margin-right:3px;\"></i>" + $("<div>").text(email).html() : "";
+                    var phoneHtml = phone ? " &nbsp;&bull;&nbsp; <i class=\"fas fa-phone\" style=\"font-size:10px;margin-right:3px;\"></i>" + $("<div>").text(phone).html() : "";
+
+                    return $(
+                        "<div style=\"padding:3px 2px;\">" +
+                            "<div style=\"font-weight:700;color:#1e293b;font-size:13px;\">" +
+                                "<span style=\"display:inline-block;background:#e0f2fe;color:#0369a1;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:800;margin-right:6px;\">#" + id + "</span>" +
+                                $("<div>").text(name).html() + compHtml +
+                            "</div>" +
+                            "<div style=\"font-size:11.5px;color:#64748b;margin-top:2px;\">" + emailHtml + phoneHtml + "</div>" +
+                        "</div>"
+                    );
+                }
+
+                function csmFormatClientSelection(state) {
+                    if (!state.id) return state.text;
+                    var $el = $(state.element);
+                    var name = $el.data("name");
+                    var company = $el.data("company");
+                    var id = state.id;
+                    if (name) {
+                        return "#" + id + " " + name + (company ? " (" + company + ")" : "");
+                    }
+                    return state.text;
+                }
+
                 $("#csmSelectMonitoredClients").select2({
                     placeholder: "Search client by name, email, phone, company...",
                     allowClear: true,
                     width: "100%",
-                    dropdownParent: $("#csmAddMonitoredClientsModal")
+                    dropdownParent: $("#csmAddMonitoredClientsModal"),
+                    templateResult: csmFormatClientOption,
+                    templateSelection: csmFormatClientSelection,
+                    escapeMarkup: function(m) { return m; }
                 });
 
                 $("#csmSingleClientSelect").select2({
                     placeholder: "Search WHMCS client...",
                     allowClear: true,
                     width: "100%",
-                    dropdownParent: $("#csmCustomerModal")
+                    dropdownParent: $("#csmCustomerModal"),
+                    templateResult: csmFormatClientOption,
+                    templateSelection: csmFormatClientSelection,
+                    escapeMarkup: function(m) { return m; }
                 });
 
                 $("#csmSingleClientSelect").on("change", function() {
