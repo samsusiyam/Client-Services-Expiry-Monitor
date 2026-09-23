@@ -60,7 +60,7 @@ if (!function_exists('csm_ensure_tables')) {
                 });
             }
 
-            // 3. Service & Customer Due Notes / Ledger Table (হিসাব-নিকাশ)
+            // 3. Service & Customer Due Notes / Ledger Table
             if (!Capsule::schema()->hasTable('mod_csm_service_notes')) {
                 Capsule::schema()->create('mod_csm_service_notes', function ($table) {
                     $table->increments('id');
@@ -620,7 +620,7 @@ if (!function_exists('csm_render_header')) {
                         <i class="fas fa-clock-rotate-left"></i> Custom Suspend Overdue
                     </a>
                     <a href="' . csm_h($moduleLink) . '&action=due_notes" class="csm-nav-btn' . ($action === 'due_notes' ? ' active' : '') . '">
-                        <i class="fas fa-book-bookmark"></i> Due Notes / হিসাব
+                        <i class="fas fa-book-bookmark"></i> Due Notes &amp; Ledger
                     </a>
                     <a href="' . csm_h($moduleLink) . '&action=module_setup" class="csm-nav-btn' . ($action === 'module_setup' ? ' active' : '') . '">
                         <i class="fas fa-cogs"></i> Module Setup
@@ -647,7 +647,7 @@ if (!function_exists('csm_render_footer')) {
             'live_monitor'        => 'Live Monitor',
             'custom_customers'    => 'Custom Customers & Ledger',
             'suspension_manager'  => 'Custom Suspend Overdue',
-            'due_notes'           => 'Due Notes / হিসাব',
+            'due_notes'           => 'Due Notes & Ledger',
             'module_setup'        => 'Module Setup',
             'changelog'           => 'Changelog',
             'developer_info'      => 'Developer Info',
@@ -720,7 +720,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                             <th>Cycle</th>
                             <th>Due Date</th>
                             <th>Status</th>
-                            <th>Due Note / হিসাব</th>
+                            <th>Due Note / Remarks</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -844,8 +844,8 @@ if (!function_exists('csm_render_custom_customers_page')) {
                                     </select>
                                 </div>
                                 <div class="col-md-6 form-group">
-                                    <label>Initial Note / হিসাব</label>
-                                    <input type="text" name="notes" id="csmCustNotes" class="form-control" placeholder="e.g. 500 tk advance given">
+                                    <label>Initial Note / Remarks</label>
+                                    <input type="text" name="notes" id="csmCustNotes" class="form-control" placeholder="e.g. Paid $50 advance, balance $50 due">
                                 </div>
                             </div>
                         </div>
@@ -1075,7 +1075,7 @@ if (!function_exists('csm_render_due_notes_page')) {
         $html = '<div class="csm-table-card">
             <div class="csm-table-header">
                 <div>
-                    <h3><i class="fas fa-book-bookmark text-primary"></i> Service Due Notes &amp; Payment Ledger (হিসাব-নিকাশ)</h3>
+                    <h3><i class="fas fa-book-bookmark text-primary"></i> Service Due Notes &amp; Payment Ledger</h3>
                     <div class="csm-muted">History of all payment remarks, partial payments, and promised due dates.</div>
                 </div>
             </div>
@@ -1086,7 +1086,7 @@ if (!function_exists('csm_render_due_notes_page')) {
                             <th>Date &amp; Time</th>
                             <th>Target Entity</th>
                             <th>ID</th>
-                            <th>Note / হিসাব</th>
+                            <th>Note / Remarks</th>
                             <th>Paid Amount</th>
                             <th>Due Amount</th>
                             <th>Promised Date</th>
@@ -1208,7 +1208,7 @@ if (!function_exists('csm_render_changelog_page')) {
                     <ul style="margin:8px 0 0 0;padding-left:18px;font-size:13px;line-height:1.7;color:#334155;">
                         <li>Redesigned entire module UI to a clean tabbed navigation architecture matching the enterprise WHMCS standard.</li>
                         <li><strong>Custom Customers &amp; Ledger:</strong> Added support for adding offline/custom clients and tracking their recurring service dues.</li>
-                        <li><strong>Inline Due Notes / হিসাব:</strong> Added instant payment ledger notes and promised due date records for all services.</li>
+                        <li><strong>Inline Due Notes &amp; Ledger:</strong> Added instant payment ledger notes and promised due date records for all services.</li>
                         <li><strong>Custom Suspend Overdue Manager:</strong> Added custom grace period suspension override without changing WHMCS core Next Due Date.</li>
                         <li>Moved all configuration settings directly into the module dashboard page.</li>
                     </ul>
@@ -1265,6 +1265,9 @@ if (!function_exists('client_services_monitor_output')) {
 
         // AJAX Note Handler
         if (isset($_GET['ajax']) && $_GET['ajax'] === 'save_note' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
             header('Content-Type: application/json');
             $relType = trim($_POST['rel_type'] ?? 'service');
             $relId = (int)($_POST['rel_id'] ?? 0);
@@ -1302,6 +1305,9 @@ if (!function_exists('client_services_monitor_output')) {
 
         // AJAX Fetch Notes List Handler
         if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_notes') {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
             header('Content-Type: application/json');
             $relType = trim($_GET['rel_type'] ?? 'service');
             $relId = (int)($_GET['rel_id'] ?? 0);
@@ -1318,8 +1324,10 @@ if (!function_exists('client_services_monitor_output')) {
 
         // AJAX Fetch Services Data for Live Monitor
         if (isset($_GET['ajax']) && $_GET['ajax'] == '1') {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
             header('Content-Type: application/json');
-            ob_clean();
             try {
                 $response = client_services_monitor_fetch_data($_REQUEST, $vars);
                 echo json_encode($response);
@@ -1419,6 +1427,9 @@ if (!function_exists('client_services_monitor_output')) {
                 }
 
                 if ((isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') || (isset($_GET['ajax']) && $_GET['ajax'] == '1')) {
+                    while (ob_get_level() > 0) {
+                        ob_end_clean();
+                    }
                     header('Content-Type: application/json');
                     echo json_encode(['success' => true]);
                     exit;
@@ -1479,6 +1490,7 @@ if (!function_exists('client_services_monitor_output')) {
             echo csm_render_developer_page();
         } else {
             // Live Monitor Page
+            $modulelink = $vars['modulelink'] ?? 'addonmodules.php?module=client_services_monitor';
             $servers = Capsule::table('tblservers')->select('id', 'name', 'ipaddress')->orderBy('name', 'ASC')->get();
             $productGroups = Capsule::table('tblproductgroups')->select('id', 'name')->orderBy('order', 'ASC')->get();
             $products = Capsule::table('tblproducts')
@@ -1621,10 +1633,86 @@ if (!function_exists('client_services_monitor_fetch_data')) {
                              ->skip(($page - 1) * $limit)
                              ->take($limit)
                              ->get();
+        } else {
+            // Query Domains
+            $query = Capsule::table('tbldomains')
+                ->join('tblclients', 'tbldomains.userid', '=', 'tblclients.id')
+                ->select(
+                    'tbldomains.id as item_id',
+                    Capsule::raw("'domain' as record_type"),
+                    'tbldomains.userid',
+                    'tbldomains.orderid',
+                    'tbldomains.registrationdate as regdate',
+                    'tbldomains.domain',
+                    'tbldomains.paymentmethod',
+                    'tbldomains.firstpaymentamount',
+                    'tbldomains.recurringamount as price',
+                    'tbldomains.registrationperiod as billingcycle',
+                    'tbldomains.nextduedate',
+                    'tbldomains.status',
+                    Capsule::raw("'' as username"),
+                    Capsule::raw("'' as dedicatedip"),
+                    Capsule::raw("'Domain Registration' as product_name"),
+                    Capsule::raw("'domain' as product_type"),
+                    Capsule::raw("'' as group_name"),
+                    Capsule::raw("'' as server_name"),
+                    'tblclients.firstname',
+                    'tblclients.lastname',
+                    'tblclients.companyname',
+                    'tblclients.email',
+                    'tblclients.phonenumber',
+                    'tblclients.currency as client_currency'
+                );
+
+            if (!empty($paymentMethod) && $paymentMethod !== 'Any') {
+                $query->where('tbldomains.paymentmethod', $paymentMethod);
+            }
+
+            if ($status === 'Active') {
+                $query->where('tbldomains.status', 'Active');
+            } elseif (!empty($status) && $status !== 'All' && $status !== 'Any') {
+                $query->where('tbldomains.status', $status);
+            }
+
+            if (!empty($dueFilter)) {
+                $today = date('Y-m-d');
+                if ($dueFilter === 'today') {
+                    $query->where('tbldomains.nextduedate', '=', $today);
+                } elseif ($dueFilter === '3days') {
+                    $query->whereBetween('tbldomains.nextduedate', [$today, date('Y-m-d', strtotime('+3 days'))]);
+                } elseif ($dueFilter === '7days') {
+                    $query->whereBetween('tbldomains.nextduedate', [$today, date('Y-m-d', strtotime('+7 days'))]);
+                } elseif ($dueFilter === '15days') {
+                    $query->whereBetween('tbldomains.nextduedate', [$today, date('Y-m-d', strtotime('+15 days'))]);
+                } elseif ($dueFilter === '30days') {
+                    $query->whereBetween('tbldomains.nextduedate', [$today, date('Y-m-d', strtotime('+30 days'))]);
+                } elseif ($dueFilter === 'overdue') {
+                    $query->where('tbldomains.nextduedate', '<', $today);
+                }
+            }
+
+            if (!empty($search)) {
+                $query->where(function ($q) use ($search) {
+                    $q->where('tbldomains.id', $search)
+                      ->orWhere('tbldomains.domain', 'like', "%{$search}%")
+                      ->orWhere('tblclients.firstname', 'like', "%{$search}%")
+                      ->orWhere('tblclients.lastname', 'like', "%{$search}%")
+                      ->orWhere(Capsule::raw("CONCAT(tblclients.firstname, ' ', tblclients.lastname)"), 'like', "%{$search}%")
+                      ->orWhere('tblclients.email', 'like', "%{$search}%")
+                      ->orWhere('tblclients.phonenumber', 'like', "%{$search}%");
+                });
+            }
+
+            $totalRecords = $query->count();
+            $records = $query->orderBy('tbldomains.nextduedate', 'ASC')
+                             ->orderBy('tbldomains.id', 'DESC')
+                             ->skip(($page - 1) * $limit)
+                             ->take($limit)
+                             ->get();
         }
 
         // Fetch overrides & notes for returned records in bulk
-        $serviceIds = $records->pluck('item_id')->toArray();
+        $serviceIds = !empty($records) ? $records->pluck('item_id')->toArray() : [];
         $overrides = Capsule::table('mod_csm_suspension_overrides')
             ->whereIn('service_id', $serviceIds)
             ->where('status', 'active')
@@ -1632,7 +1720,7 @@ if (!function_exists('client_services_monitor_fetch_data')) {
             ->keyBy('service_id');
 
         $notes = Capsule::table('mod_csm_service_notes')
-            ->where('rel_type', 'service')
+            ->where('rel_type', $isDomainOnly ? 'domain' : 'service')
             ->whereIn('rel_id', $serviceIds)
             ->orderBy('id', 'DESC')
             ->get()
@@ -1645,7 +1733,7 @@ if (!function_exists('client_services_monitor_fetch_data')) {
         foreach ($records as $row) {
             $curr = $allCurrencies->get($row->client_currency) ?: $defaultCurrency;
             $prefix = $curr ? $curr->prefix : '';
-            $suffix = $curr ? $curr->suffix : 'BDT';
+            $suffix = $curr && !empty($curr->suffix) ? $curr->suffix : '';
 
             $dueDateStr = $row->nextduedate && $row->nextduedate !== '0000-00-00' ? $row->nextduedate : null;
             $daysLeft = null;

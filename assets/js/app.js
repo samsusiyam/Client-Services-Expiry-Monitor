@@ -233,13 +233,13 @@
                 graceHtml = '<button class="btn btn-default btn-xs" onclick="openLiveGraceModal(' + item.id + ', \'' + escapeHtml(addslashes(item.product_name + ' - ' + (item.domain || item.client_name))) + '\', \'' + escapeHtml(item.next_due_date) + '\')" title="Set Custom Grace Suspend Date"><i class="fas fa-plus"></i> Grace</button>';
             }
 
-            // Due Note / হিসাব Column
+            // Due Note / Remarks Column
             var noteHtml = '';
             if (item.latest_note) {
                 noteHtml = '<span class="label label-info" style="font-size:11px;" title="' + escapeHtml(item.latest_note) + '"><i class="fas fa-note-sticky"></i> ' + escapeHtml(item.latest_note.substring(0, 16)) + '...</span> ' +
                     '<button class="btn btn-default btn-xs" onclick="openNoteModal(\'service\', ' + item.id + ', \'' + escapeHtml(addslashes(item.product_name + ' (#' + item.id + ')')) + '\', ' + item.price + ')" title="View/Add Note"><i class="fas fa-pen"></i></button>';
             } else {
-                noteHtml = '<button class="btn btn-default btn-xs" onclick="openNoteModal(\'service\', ' + item.id + ', \'' + escapeHtml(addslashes(item.product_name + ' (#' + item.id + ')')) + '\', ' + item.price + ')" title="Add Due Note / হিসাব"><i class="fas fa-plus"></i> হিসাব</button>';
+                noteHtml = '<button class="btn btn-default btn-xs" onclick="openNoteModal(\'service\', ' + item.id + ', \'' + escapeHtml(addslashes(item.product_name + ' (#' + item.id + ')')) + '\', ' + item.price + ')" title="Add Due Note / Remarks"><i class="fas fa-plus"></i> Note</button>';
             }
 
             // Domain Link
@@ -430,7 +430,7 @@
         }
 
         $.ajax({
-            url: '?module=client_services_monitor&action=save_grace_suspend',
+            url: (typeof CSM_MODULE_LINK !== 'undefined' ? CSM_MODULE_LINK : 'addonmodules.php?module=client_services_monitor') + '&action=save_grace_suspend',
             type: 'POST',
             data: {
                 service_id: serviceId,

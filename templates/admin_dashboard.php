@@ -228,7 +228,7 @@ if (!defined("WHMCS")) {
                         <th>Billing</th>
                         <th>Next Due Date <i class="fa-solid fa-arrow-down-short-wide text-primary"></i></th>
                         <th>Grace Suspend</th>
-                        <th>Due Note / হিসাব</th>
+                        <th>Due Note / Remarks</th>
                         <th>Status</th>
                         <th width="90" class="text-center">Action</th>
                     </tr>
@@ -251,13 +251,13 @@ if (!defined("WHMCS")) {
     </div>
 </div>
 
-<!-- Modal: Due Note / হিসাব Ledger -->
+<!-- Modal: Due Note & Ledger -->
 <div class="modal fade" id="csmNoteModal" tabindex="-1" role="dialog">
     <div class="modal-dialog modal-md" role="document">
         <div class="modal-content" style="border-radius:8px;">
             <div class="modal-header" style="background:#12589b;color:#fff;border-radius:7px 7px 0 0;">
                 <button type="button" class="close" data-dismiss="modal" style="color:#fff;">&times;</button>
-                <h4 class="modal-title"><i class="fas fa-book-bookmark"></i> Service Due Note &amp; Ledger (হিসাব)</h4>
+                <h4 class="modal-title"><i class="fas fa-book-bookmark"></i> Service Due Note &amp; Ledger</h4>
             </div>
             <div class="modal-body" style="padding:20px;">
                 <div class="form-group">
@@ -269,7 +269,7 @@ if (!defined("WHMCS")) {
 
                 <div class="form-group">
                     <label>Add New Note / Payment Remark <span class="text-danger">*</span></label>
-                    <textarea id="modalNoteText" class="form-control" rows="2" placeholder="e.g. Bkash e 500 tk diche, baki 500 tk 25 tarike dibe"></textarea>
+                    <textarea id="modalNoteText" class="form-control" rows="2" placeholder="e.g. Paid $50 via Stripe, remaining balance due on 25th"></textarea>
                 </div>
 
                 <div class="row">
@@ -377,8 +377,9 @@ if (!defined("WHMCS")) {
 </div>
 
 <script>
-    var CSM_AJAX_URL = "<?php echo $modulelink; ?>&ajax=1";
-    var CSM_NOTE_URL = "<?php echo $modulelink; ?>&ajax=save_note";
-    var CSM_GET_NOTES_URL = "<?php echo $modulelink; ?>&ajax=get_notes";
+    var CSM_MODULE_LINK = "<?php echo addslashes($modulelink ?? ($vars['modulelink'] ?? 'addonmodules.php?module=client_services_monitor')); ?>";
+    var CSM_AJAX_URL = CSM_MODULE_LINK + "&ajax=1";
+    var CSM_NOTE_URL = CSM_MODULE_LINK + "&ajax=save_note";
+    var CSM_GET_NOTES_URL = CSM_MODULE_LINK + "&ajax=get_notes";
 </script>
 <script src="../modules/addons/client_services_monitor/assets/js/app.js?v=<?php echo time(); ?>"></script>
