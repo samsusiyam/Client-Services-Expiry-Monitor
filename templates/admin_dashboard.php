@@ -269,7 +269,7 @@ if (!defined("WHMCS")) {
 
                 <div class="form-group">
                     <label>Add New Note / Payment Remark <span class="text-danger">*</span></label>
-                    <textarea id="modalNoteText" class="form-control" rows="2" placeholder="e.g. Paid $50 via Stripe, remaining balance due on 25th"></textarea>
+                    <textarea id="modalNoteText" class="form-control" rows="2" placeholder="e.g. Paid 500 Tk via bKash, remaining 500 Tk due on 25th"></textarea>
                 </div>
 
                 <div class="row">

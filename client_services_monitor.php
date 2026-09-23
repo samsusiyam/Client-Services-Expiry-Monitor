@@ -681,6 +681,13 @@ if (!function_exists('csm_render_custom_customers_page')) {
             $html .= '<div class="alert alert-info"><i class="fas fa-info-circle"></i> Custom Customer record deleted.</div>';
         }
 
+        $defaultCurrency = null;
+        try {
+            $defaultCurrency = Capsule::table('tblcurrencies')->where('default', 1)->first() ?: Capsule::table('tblcurrencies')->first();
+        } catch (\Exception $e) {}
+        $currPrefix = ($defaultCurrency && !empty($defaultCurrency->prefix)) ? $defaultCurrency->prefix : '৳ ';
+        $currSuffix = ($defaultCurrency && !empty($defaultCurrency->suffix)) ? $defaultCurrency->suffix : '';
+
         $totalCustom = $customers->count();
         $totalDue = $customers->where('status', 'Unpaid')->sum('amount');
         $activeCount = $customers->where('status', 'Active')->count();
@@ -696,7 +703,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
             </div>
             <div class="csm-stat">
                 <div class="csm-stat-label">Total Unpaid Due</div>
-                <div class="csm-stat-value" style="color:#dc2626;">' . number_format((float)$totalDue, 2) . '</div>
+                <div class="csm-stat-value" style="color:#dc2626;">' . $currPrefix . number_format((float)$totalDue, 2) . $currSuffix . '</div>
             </div>
         </div>';
 
@@ -756,7 +763,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                         <strong>' . csm_h($c->service_name) . '</strong>
                         ' . ($c->domain ? '<br><small style="color:#1d4ed8;">' . csm_h($c->domain) . '</small>' : '') . '
                     </td>
-                    <td><strong>' . number_format((float)$c->amount, 2) . '</strong></td>
+                    <td><strong>' . $currPrefix . number_format((float)$c->amount, 2) . $currSuffix . '</strong></td>
                     <td>' . csm_h($c->billing_cycle) . '</td>
                     <td>' . ($c->next_due_date ? date('d/m/Y', strtotime($c->next_due_date)) : 'N/A') . '</td>
                     <td><span class="csm-badge csm-badge-' . $statusClass . '">' . csm_h($c->status) . '</span></td>
@@ -845,7 +852,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                                 </div>
                                 <div class="col-md-6 form-group">
                                     <label>Initial Note / Remarks</label>
-                                    <input type="text" name="notes" id="csmCustNotes" class="form-control" placeholder="e.g. Paid $50 advance, balance $50 due">
+                                    <input type="text" name="notes" id="csmCustNotes" class="form-control" placeholder="e.g. Paid 500 Tk advance, remaining 500 Tk due">
                                 </div>
                             </div>
                         </div>
@@ -1072,6 +1079,13 @@ if (!function_exists('csm_render_due_notes_page')) {
         $moduleLink = $vars['modulelink'];
         $notes = Capsule::table('mod_csm_service_notes')->orderBy('id', 'DESC')->take(100)->get();
 
+        $defaultCurrency = null;
+        try {
+            $defaultCurrency = Capsule::table('tblcurrencies')->where('default', 1)->first() ?: Capsule::table('tblcurrencies')->first();
+        } catch (\Exception $e) {}
+        $currPrefix = ($defaultCurrency && !empty($defaultCurrency->prefix)) ? $defaultCurrency->prefix : '৳ ';
+        $currSuffix = ($defaultCurrency && !empty($defaultCurrency->suffix)) ? $defaultCurrency->suffix : '';
+
         $html = '<div class="csm-table-card">
             <div class="csm-table-header">
                 <div>
@@ -1107,8 +1121,8 @@ if (!function_exists('csm_render_due_notes_page')) {
                     <td><span class="label label-info">' . csm_h(strtoupper($n->rel_type)) . '</span></td>
                     <td>#' . $n->rel_id . '</td>
                     <td><strong>' . csm_h($n->note) . '</strong></td>
-                    <td>' . ($n->paid_amount !== null ? '<span style="color:#16a34a;font-weight:700;">+' . number_format((float)$n->paid_amount, 2) . '</span>' : '—') . '</td>
-                    <td>' . ($n->due_amount !== null ? '<span style="color:#dc2626;font-weight:700;">' . number_format((float)$n->due_amount, 2) . '</span>' : '—') . '</td>
+                    <td>' . ($n->paid_amount !== null ? '<span style="color:#16a34a;font-weight:700;">+' . $currPrefix . number_format((float)$n->paid_amount, 2) . $currSuffix . '</span>' : '—') . '</td>
+                    <td>' . ($n->due_amount !== null ? '<span style="color:#dc2626;font-weight:700;">' . $currPrefix . number_format((float)$n->due_amount, 2) . $currSuffix . '</span>' : '—') . '</td>
                     <td>' . ($n->promised_date ? date('d/m/Y', strtotime($n->promised_date)) : '—') . '</td>
                     <td>' . csm_h($n->admin_name ?: 'Admin') . '</td>
                 </tr>';
