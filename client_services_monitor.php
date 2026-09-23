@@ -905,6 +905,19 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 ->get();
         } catch (\Exception $e) {}
 
+        // Fetch Servers for Filter
+        $servers = [];
+        try {
+            $servers = Capsule::table('tblservers')->select('id', 'name', 'ipaddress')->orderBy('name', 'ASC')->get();
+        } catch (\Exception $e) {}
+
+        $serverFilterOptions = '<option value="0">Any</option>';
+        if (!empty($servers)) {
+            foreach ($servers as $srv) {
+                $serverFilterOptions .= '<option value="' . $srv->id . '">' . csm_h($srv->name . ($srv->ipaddress ? ' (' . $srv->ipaddress . ')' : '')) . '</option>';
+            }
+        }
+
         // Fetch Monitored Client IDs
         $monitoredRows = Capsule::table('mod_csm_monitored_clients')->get();
         $monitoredUserIds = $monitoredRows->pluck('userid')->toArray();
@@ -945,6 +958,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     'tblproducts.name as product_name',
                     'tblproducts.type as product_type',
                     'tblproductgroups.name as group_name',
+                    'tblhosting.server as server_id',
                     'tblservers.name as server_name',
                     'tblclients.firstname',
                     'tblclients.lastname',
@@ -1029,6 +1043,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 'product_name' => $srv->product_name,
                 'product_type' => $srv->product_type,
                 'group_name'   => $srv->group_name ?: '',
+                'server_id'    => (int)($srv->server_id ?? 0),
                 'server_name'  => $srv->server_name ?: '',
                 'domain'       => $srv->domain ?: '',
                 'price'        => (float)$srv->price,
@@ -1052,6 +1067,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 'product_name' => 'Domain Registration',
                 'product_type' => 'domain',
                 'group_name'   => '',
+                'server_id'    => 0,
                 'server_name'  => '',
                 'domain'       => $dom->domain ?: '',
                 'price'        => (float)$dom->price,
@@ -1075,6 +1091,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 'product_name' => $cust->service_name,
                 'product_type' => 'custom',
                 'group_name'   => 'Offline / Custom Service',
+                'server_id'    => 0,
                 'server_name'  => '',
                 'domain'       => $cust->domain ?: '',
                 'price'        => (float)$cust->amount,
@@ -1215,6 +1232,122 @@ if (!function_exists('csm_render_custom_customers_page')) {
             </div>
         </div>';
 
+        // Real-Time Search & Filtering Panel (Identical Layout to Live Monitor)
+        $html .= '<div class="panel panel-default csm-filter-panel" style="border-radius:8px;border:1px solid #dce6f2;margin-bottom:20px;background:#ffffff;box-shadow:0 10px 24px rgba(15,23,42,0.06);overflow:hidden;">
+            <div class="panel-heading" style="background:#f8fafc;padding:12px 18px;border-bottom:1px solid #e2e8f0;">
+                <h3 class="panel-title" style="font-weight:700;font-size:14px;margin:0;color:#1e293b;"><i class="fa-solid fa-filter text-primary"></i> Real-Time Search &amp; Filtering</h3>
+            </div>
+            <div class="panel-body" style="padding:18px;">
+                <form id="customFilterForm" onsubmit="return false;">
+                    <div class="row">
+                        <!-- Left Column -->
+                        <div class="col-md-6 col-sm-12">
+                            <div class="form-group row" style="margin-bottom:12px;display:flex;align-items:center;">
+                                <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Product Type</label>
+                                <div class="col-sm-8">
+                                    <select id="filterCustomProductType" class="form-control">
+                                        <option value="">Any / All Types</option>
+                                        <option value="server">VPS / Dedicated Server</option>
+                                        <option value="hostingaccount">Shared Hosting</option>
+                                        <option value="reselleraccount">Reseller Hosting</option>
+                                        <option value="other">Other Product/Service</option>
+                                        <option value="domain">Domain Names</option>
+                                        <option value="custom_customer">Offline / Custom Services</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-group row" style="margin-bottom:12px;display:flex;align-items:center;">
+                                <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Billing Cycle</label>
+                                <div class="col-sm-8">
+                                    <select id="filterCustomBillingCycle" class="form-control">
+                                        <option value="Any">Any</option>
+                                        <option value="Monthly">Monthly</option>
+                                        <option value="Quarterly">Quarterly</option>
+                                        <option value="Semi-Annually">Semi-Annually</option>
+                                        <option value="Annually">Annually</option>
+                                        <option value="Biennially">Biennially</option>
+                                        <option value="Triennially">Triennially</option>
+                                        <option value="One Time">One Time</option>
+                                        <option value="Free Account">Free Account</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-group row" style="margin-bottom:12px;display:flex;align-items:center;">
+                                <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Next Due Filter</label>
+                                <div class="col-sm-8">
+                                    <select id="filterCustomDueStatus" class="form-control">
+                                        <option value="">All Due Dates</option>
+                                        <option value="today">Due Today</option>
+                                        <option value="3days">Expiring in 3 Days</option>
+                                        <option value="7days">Expiring in 7 Days</option>
+                                        <option value="15days">Expiring in 15 Days</option>
+                                        <option value="30days">Expiring in 30 Days / This Month</option>
+                                        <option value="overdue">Overdue (Expired)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-group row" style="margin-bottom:12px;display:flex;align-items:center;">
+                                <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Monitored Client</label>
+                                <div class="col-sm-8">
+                                    <select id="filterCustomClient" class="form-control">
+                                        ' . $clientFilterOptions . '
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Column -->
+                        <div class="col-md-6 col-sm-12">
+                            <div class="form-group row" style="margin-bottom:12px;display:flex;align-items:center;">
+                                <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Server</label>
+                                <div class="col-sm-8">
+                                    <select id="filterCustomServer" class="form-control">
+                                        ' . $serverFilterOptions . '
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-group row" style="margin-bottom:12px;display:flex;align-items:center;">
+                                <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Status</label>
+                                <div class="col-sm-8">
+                                    <select id="filterCustomStatus" class="form-control">
+                                        <option value="">Any Status</option>
+                                        <option value="active">Active (Default)</option>
+                                        <option value="unpaid">Unpaid</option>
+                                        <option value="suspended">Suspended</option>
+                                        <option value="paid">Paid</option>
+                                        <option value="pending">Pending</option>
+                                        <option value="terminated">Terminated</option>
+                                        <option value="cancelled">Cancelled</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="form-group row" style="margin-bottom:12px;display:flex;align-items:center;">
+                                <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Live Search</label>
+                                <div class="col-sm-8">
+                                    <div class="input-group" style="width:100%;">
+                                        <input type="text" id="filterCustomSearch" class="form-control" placeholder="Search Client, Phone, Domain, IP, ID...">
+                                        <span class="input-group-btn">
+                                            <button class="btn btn-default" type="button" id="filterCustomSearchClear" title="Clear Search"><i class="fas fa-times"></i></button>
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="text-align:center;padding-top:14px;border-top:1px dashed #e2e8f0;margin-top:6px;display:flex;justify-content:center;gap:10px;">
+                        <button type="button" class="btn btn-primary" onclick="applyCustomMonitorFilters()"><i class="fa-solid fa-magnifying-glass"></i> Search / Apply Filter</button>
+                        <button type="button" class="btn btn-default" onclick="resetCustomMonitorFilters()"><i class="fa-solid fa-rotate-left"></i> Reset Filters</button>
+                    </div>
+                </form>
+            </div>
+        </div>';
+
         // Main Services Table Card
         $html .= '<div class="csm-table-card">
             <div class="csm-table-header" style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
@@ -1223,33 +1356,6 @@ if (!function_exists('csm_render_custom_customers_page')) {
                         <i class="fas fa-desktop text-primary"></i> Monitored Clients Live Service Board
                     </h3>
                     <div class="csm-muted">Showing all services, domains &amp; custom dues for the selected clients, sorted by next due date.</div>
-                </div>
-                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                    <div class="input-group" style="width:210px;">
-                        <input type="text" id="customMonitorSearchInput" class="form-control" placeholder="Search service, client...">
-                        <span class="input-group-btn">
-                            <button class="btn btn-default" type="button" id="customMonitorSearchClear" title="Clear"><i class="fas fa-times"></i></button>
-                        </span>
-                    </div>
-                    <select id="customMonitorClientFilter" class="form-control" style="width:190px;display:inline-block;" title="Filter by Client">
-                        ' . $clientFilterOptions . '
-                    </select>
-                    <select id="customMonitorTypeFilter" class="form-control" style="width:130px;display:inline-block;" title="Filter by Service Type">
-                        <option value="">All Types</option>
-                        <option value="service">Hosting / Services</option>
-                        <option value="domain">Domains</option>
-                        <option value="custom_customer">Custom / Offline</option>
-                    </select>
-                    <select id="customMonitorStatusFilter" class="form-control" style="width:130px;display:inline-block;" title="Filter by Status">
-                        <option value="">All Statuses</option>
-                        <option value="active">Active</option>
-                        <option value="unpaid">Unpaid</option>
-                        <option value="due7days">Due Soon (' . $warningDays . 'd)</option>
-                        <option value="today">Due Today</option>
-                        <option value="overdue">Overdue</option>
-                        <option value="suspended">Suspended</option>
-                        <option value="paid">Paid</option>
-                    </select>
                 </div>
             </div>
             <div style="overflow-x:auto;">
@@ -1380,9 +1486,22 @@ if (!function_exists('csm_render_custom_customers_page')) {
                         '<a href="' . csm_h($moduleLink) . '&action=delete_custom_customer&id=' . $r['id'] . '" class="btn btn-danger btn-xs" onclick="return csmConfirmDelete(this.href, \'Delete this custom service record?\')" title="Delete"><i class="fas fa-trash"></i></a>';
                 }
 
-                $searchCorpus = strtolower($r['id'] . ' ' . $r['client_name'] . ' ' . $r['company'] . ' ' . $r['email'] . ' ' . $cleanDisplayPhone . ' ' . $r['product_name'] . ' ' . $r['domain'] . ' ' . $r['status'] . ' ' . ($latestNote ? $latestNote->note : ''));
+                $dueDays = 99999;
+                if (!empty($r['next_due_date']) && $r['next_due_date'] !== '0000-00-00') {
+                    $dueDays = (int)round((strtotime($r['next_due_date']) - $todayTs) / 86400);
+                }
 
-                $html .= '<tr class="csm-custom-row" data-search="' . csm_h($searchCorpus) . '" data-status="' . csm_h($statusLower) . '" data-due="' . csm_h($dueCategory) . '" data-userid="' . (int)$r['userid'] . '" data-type="' . csm_h($r['record_type']) . '">
+                $searchCorpus = strtolower($r['id'] . ' ' . $r['client_name'] . ' ' . $r['company'] . ' ' . $r['email'] . ' ' . $cleanDisplayPhone . ' ' . $r['product_name'] . ' ' . $r['domain'] . ' ' . $r['status'] . ' ' . ($latestNote ? $latestNote->note : '') . ' ' . ($r['server_name'] ?? ''));
+
+                $html .= '<tr class="csm-custom-row"'
+                    . ' data-search="' . csm_h($searchCorpus) . '"'
+                    . ' data-userid="' . (int)$r['userid'] . '"'
+                    . ' data-producttype="' . csm_h(strtolower($r['product_type'] ?: $r['record_type'])) . '"'
+                    . ' data-serverid="' . (int)($r['server_id'] ?? 0) . '"'
+                    . ' data-billingcycle="' . csm_h($r['billing_cycle']) . '"'
+                    . ' data-status="' . csm_h($statusLower) . '"'
+                    . ' data-due="' . csm_h($dueCategory) . '"'
+                    . ' data-duedays="' . (int)$dueDays . '">
                     <td><strong>#' . $r['id'] . '</strong>' . ($r['is_custom'] ? '<br><span class="label label-default" style="font-size:9px;">Custom</span>' : '') . '</td>
                     <td>
                         <strong>' . csm_h($r['product_name']) . '</strong>
@@ -1765,27 +1884,20 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 });
             }
 
-            // Real-Time Table Live Search & Filter
-            $("#customMonitorSearchInput").on("input", function() {
+            // Real-Time Table Live Search & Filter (8-field Panel)
+            $("#filterCustomSearch").on("input", function() {
                 applyCustomMonitorFilters();
             });
 
-            $("#customMonitorSearchClear").on("click", function() {
-                $("#customMonitorSearchInput").val("");
+            $("#filterCustomSearchClear").on("click", function() {
+                $("#filterCustomSearch").val("");
                 applyCustomMonitorFilters();
             });
 
-            $("#customMonitorClientFilter").on("change", function() {
-                var uId = $(this).val();
-                highlightActiveClientChip(uId);
-                applyCustomMonitorFilters();
-            });
-
-            $("#customMonitorTypeFilter").on("change", function() {
-                applyCustomMonitorFilters();
-            });
-
-            $("#customMonitorStatusFilter").on("change", function() {
+            $("#filterCustomClient, #filterCustomProductType, #filterCustomBillingCycle, #filterCustomDueStatus, #filterCustomServer, #filterCustomStatus").on("change", function() {
+                if ($(this).attr("id") === "filterCustomClient") {
+                    highlightActiveClientChip($(this).val());
+                }
                 applyCustomMonitorFilters();
             });
         });
@@ -1807,40 +1919,82 @@ if (!function_exists('csm_render_custom_customers_page')) {
         }
 
         window.csmFilterByClient = function(userId) {
-            $("#customMonitorClientFilter").val(userId ? String(userId) : "");
+            $("#filterCustomClient").val(userId ? String(userId) : "");
             highlightActiveClientChip(userId);
             applyCustomMonitorFilters();
         };
 
+        window.resetCustomMonitorFilters = function() {
+            $("#filterCustomSearch").val("");
+            $("#filterCustomClient").val("");
+            $("#filterCustomProductType").val("");
+            $("#filterCustomBillingCycle").val("Any");
+            $("#filterCustomDueStatus").val("");
+            $("#filterCustomServer").val("0");
+            $("#filterCustomStatus").val("");
+            highlightActiveClientChip("");
+            applyCustomMonitorFilters();
+        };
+
+        window.csmFilterCustom = function(statusVal) {
+            if (statusVal === "due7days" || statusVal === "today" || statusVal === "overdue") {
+                $("#filterCustomDueStatus").val(statusVal === "due7days" ? "7days" : statusVal);
+                $("#filterCustomStatus").val("");
+            } else if (statusVal === "active" || statusVal === "unpaid" || statusVal === "suspended" || statusVal === "paid") {
+                $("#filterCustomDueStatus").val("");
+                $("#filterCustomStatus").val(statusVal);
+            } else {
+                resetCustomMonitorFilters();
+                return;
+            }
+            applyCustomMonitorFilters();
+        };
+
         function applyCustomMonitorFilters() {
-            var search = ($("#customMonitorSearchInput").val() || "").toLowerCase().trim();
-            var clientFilter = ($("#customMonitorClientFilter").val() || "").toString().trim();
-            var typeFilter = ($("#customMonitorTypeFilter").val() || "").toLowerCase().trim();
-            var statusFilter = ($("#customMonitorStatusFilter").val() || "").toLowerCase().trim();
+            var search = ($("#filterCustomSearch").val() || "").toLowerCase().trim();
+            var clientFilter = ($("#filterCustomClient").val() || "").toString().trim();
+            var typeFilter = ($("#filterCustomProductType").val() || "").toLowerCase().trim();
+            var cycleFilter = ($("#filterCustomBillingCycle").val() || "").trim();
+            var dueFilter = ($("#filterCustomDueStatus").val() || "").toLowerCase().trim();
+            var serverFilter = ($("#filterCustomServer").val() || "0").toString().trim();
+            var statusFilter = ($("#filterCustomStatus").val() || "").toLowerCase().trim();
             var visibleCount = 0;
 
             $(".csm-custom-row").each(function() {
                 var $row = $(this);
                 var rowSearch = $row.data("search") || "";
-                var rowStatus = ($row.data("status") || "").toString().toLowerCase();
-                var rowDue = ($row.data("due") || "").toString().toLowerCase();
                 var rowUserid = ($row.data("userid") || "").toString().trim();
-                var rowType = ($row.data("type") || "").toString().toLowerCase();
+                var rowType = ($row.data("producttype") || "").toString().toLowerCase();
+                var rowCycle = ($row.data("billingcycle") || "").toString().trim();
+                var rowServer = ($row.data("serverid") || "0").toString().trim();
+                var rowStatus = ($row.data("status") || "").toString().toLowerCase();
+                var rowDueDays = parseInt($row.data("duedays"), 10);
 
                 var matchesSearch = !search || rowSearch.indexOf(search) > -1;
                 var matchesClient = !clientFilter || (rowUserid === clientFilter);
-                var matchesType = !typeFilter || (rowType === typeFilter);
-                var matchesStatus = true;
+                var matchesType = !typeFilter || (rowType === typeFilter) || (typeFilter === "custom_customer" && rowType === "custom");
+                var matchesCycle = !cycleFilter || cycleFilter === "Any" || (rowCycle.toLowerCase() === cycleFilter.toLowerCase());
+                var matchesServer = (serverFilter === "0" || !serverFilter) || (rowServer === serverFilter);
+                var matchesStatus = !statusFilter || (rowStatus === statusFilter);
 
-                if (statusFilter) {
-                    if (statusFilter === "due7days" || statusFilter === "today" || statusFilter === "overdue") {
-                        matchesStatus = (rowDue === statusFilter);
-                    } else {
-                        matchesStatus = (rowStatus === statusFilter);
+                var matchesDue = true;
+                if (dueFilter) {
+                    if (dueFilter === "today") {
+                        matchesDue = (rowDueDays === 0);
+                    } else if (dueFilter === "3days") {
+                        matchesDue = (rowDueDays >= 0 && rowDueDays <= 3);
+                    } else if (dueFilter === "7days") {
+                        matchesDue = (rowDueDays >= 0 && rowDueDays <= 7);
+                    } else if (dueFilter === "15days") {
+                        matchesDue = (rowDueDays >= 0 && rowDueDays <= 15);
+                    } else if (dueFilter === "30days") {
+                        matchesDue = (rowDueDays >= 0 && rowDueDays <= 30);
+                    } else if (dueFilter === "overdue") {
+                        matchesDue = (rowDueDays < 0);
                     }
                 }
 
-                if (matchesSearch && matchesClient && matchesType && matchesStatus) {
+                if (matchesSearch && matchesClient && matchesType && matchesCycle && matchesServer && matchesStatus && matchesDue) {
                     $row.show();
                     visibleCount++;
                 } else {
@@ -1850,18 +2004,13 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
             if (visibleCount === 0 && $(".csm-custom-row").length > 0) {
                 if ($("#csmCustomNoMatchRow").length === 0) {
-                    $("#csmCustomMonitorTableBody").append("<tr id=\'csmCustomNoMatchRow\'><td colspan=\'11\' style=\'text-align:center;padding:30px;color:#64748b;\'><i class=\'fas fa-search\'></i> No services match your filter.</td></tr>");
+                    $("#csmCustomMonitorTableBody").append("<tr id=\'csmCustomNoMatchRow\'><td colspan=\'11\' style=\'text-align:center;padding:35px;color:#64748b;font-weight:600;\'><i class=\'fas fa-search\'></i> No services match your filter criteria. <a href=\'javascript:void(0)\' onclick=\'resetCustomMonitorFilters()\' style=\'color:#0284c7;text-decoration:underline;margin-left:6px;\'>Reset Filters</a></td></tr>");
                 }
                 $("#csmCustomNoMatchRow").show();
             } else {
                 $("#csmCustomNoMatchRow").hide();
             }
         }
-
-        window.csmFilterCustom = function(statusVal) {
-            $("#customMonitorStatusFilter").val(statusVal);
-            applyCustomMonitorFilters();
-        };
 
         window.openManageMonitoredClientsModal = function() {
             $("#csmAddMonitoredClientsModal").modal("show");
