@@ -770,15 +770,12 @@ if (!function_exists('csm_render_custom_customers_page')) {
             $html .= '<div class="alert alert-success"><i class="fas fa-check-circle"></i> Ledger record(s) saved successfully.</div>';
         }
         if (isset($_GET['deleted'])) {
-            $html .= '<div class="alert alert-info"><i class="fas fa-info-circle"></i> Ledger record deleted.</div>';
+            $html .= '<div class="alert alert-info"><i class="fas fa-info-circle"></i> Ledger record deleted successfully.</div>';
         }
 
-        $defaultCurrency = null;
-        try {
-            $defaultCurrency = Capsule::table('tblcurrencies')->where('default', 1)->first() ?: Capsule::table('tblcurrencies')->first();
-        } catch (\Exception $e) {}
-        $currPrefix = ($defaultCurrency && !empty($defaultCurrency->prefix)) ? $defaultCurrency->prefix : '৳ ';
-        $currSuffix = ($defaultCurrency && !empty($defaultCurrency->suffix)) ? $defaultCurrency->suffix : '';
+        $activeCurrency = csm_get_active_currency();
+        $currPrefix = ($activeCurrency && !empty($activeCurrency->prefix)) ? $activeCurrency->prefix : '৳ ';
+        $currSuffix = ($activeCurrency && !empty($activeCurrency->suffix)) ? $activeCurrency->suffix : '';
 
         $existingClients = [];
         try {
@@ -788,97 +785,222 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 ->get();
         } catch (\Exception $e) {}
 
-        $totalCustom = $customers->count();
-        $totalDue = $customers->where('status', 'Unpaid')->sum('amount');
-        $activeCount = $customers->where('status', 'Active')->count();
+        // Calculate Stats
+        $todayStr = date('Y-m-d');
+        $todayTs = strtotime($todayStr);
+        $warningDays = (int) csm_get_setting('highlight_days', '7');
+        $defaultCountryCode = preg_replace('/[^0-9]/', '', csm_get_setting('default_country_code', '880'));
 
-        $html .= '<div class="csm-stats" style="grid-template-columns: repeat(3, 1fr);">
-            <div class="csm-stat">
-                <div class="csm-stat-label">Total Ledger Entries</div>
+        $totalCustom = $customers->count();
+        $activeCount = 0;
+        $dueTodayCount = 0;
+        $due7DaysCount = 0;
+        $overdueCount = 0;
+        $totalDue = 0.00;
+
+        foreach ($customers as $c) {
+            $st = strtolower($c->status);
+            if ($st === 'active') {
+                $activeCount++;
+            }
+            if ($st === 'unpaid') {
+                $totalDue += (float)$c->amount;
+            }
+
+            if (!empty($c->next_due_date) && $c->next_due_date !== '0000-00-00') {
+                $dueTs = strtotime($c->next_due_date);
+                $diff = (int)round(($dueTs - $todayTs) / 86400);
+
+                if ($diff < 0 && $st !== 'paid') {
+                    $overdueCount++;
+                    if ($st === 'active') {
+                        $totalDue += (float)$c->amount;
+                    }
+                } elseif ($diff === 0) {
+                    $dueTodayCount++;
+                } elseif ($diff > 0 && $diff <= $warningDays) {
+                    $due7DaysCount++;
+                }
+            }
+        }
+
+        $html .= '<div class="csm-stats" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
+            <div class="csm-stat" onclick="csmFilterLedger(\'\')" title="Show All Records">
+                <div class="csm-stat-label">Total Entries</div>
                 <div class="csm-stat-value">' . $totalCustom . '</div>
             </div>
-            <div class="csm-stat">
-                <div class="csm-stat-label">Active Services</div>
+            <div class="csm-stat" onclick="csmFilterLedger(\'active\')" title="Show Active Records">
+                <div class="csm-stat-label">Active</div>
                 <div class="csm-stat-value" style="color:#16a34a;">' . $activeCount . '</div>
             </div>
-            <div class="csm-stat">
+            <div class="csm-stat" onclick="csmFilterLedger(\'due7days\')" title="Show Due within ' . $warningDays . ' Days">
+                <div class="csm-stat-label">Due in ' . $warningDays . ' Days</div>
+                <div class="csm-stat-value" style="color:#f59e0b;">' . $due7DaysCount . '</div>
+            </div>
+            <div class="csm-stat" onclick="csmFilterLedger(\'today\')" title="Show Due Today">
+                <div class="csm-stat-label">Due Today</div>
+                <div class="csm-stat-value" style="color:#ea580c;">' . $dueTodayCount . '</div>
+            </div>
+            <div class="csm-stat" onclick="csmFilterLedger(\'overdue\')" title="Show Overdue">
+                <div class="csm-stat-label">Overdue</div>
+                <div class="csm-stat-value" style="color:#dc2626;">' . $overdueCount . '</div>
+            </div>
+            <div class="csm-stat" onclick="csmFilterLedger(\'unpaid\')" title="Show Unpaid">
                 <div class="csm-stat-label">Total Unpaid Due</div>
-                <div class="csm-stat-value" style="color:#dc2626;">' . $currPrefix . number_format((float)$totalDue, 2) . $currSuffix . '</div>
+                <div class="csm-stat-value" style="color:#dc2626;font-size:18px;">' . $currPrefix . number_format((float)$totalDue, 2) . $currSuffix . '</div>
             </div>
         </div>';
 
         $html .= '<div class="csm-table-card">
-            <div class="csm-table-header">
+            <div class="csm-table-header" style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                 <div>
-                    <h3><i class="fas fa-users-gear text-primary"></i> Client Custom Services &amp; Due Ledger</h3>
-                    <div class="csm-muted">Manage WHMCS clients, custom services, billing schedules, and payment notes.</div>
+                    <h3 style="margin:0;font-size:18px;font-weight:800;color:#1e293b;">
+                        <i class="fas fa-users-gear text-primary"></i> Client Custom Services &amp; Due Ledger
+                    </h3>
+                    <div class="csm-muted">Manage custom/offline client services, recurring billing schedules, and payment notes.</div>
                 </div>
-                <div>
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                    <div class="input-group" style="width:260px;">
+                        <input type="text" id="ledgerSearchInput" class="form-control" placeholder="Search client, phone, domain...">
+                        <span class="input-group-btn">
+                            <button class="btn btn-default" type="button" id="ledgerSearchClear" title="Clear"><i class="fas fa-times"></i></button>
+                        </span>
+                    </div>
+                    <select id="ledgerStatusFilter" class="form-control" style="width:145px;display:inline-block;">
+                        <option value="">All Statuses</option>
+                        <option value="active">Active</option>
+                        <option value="unpaid">Unpaid</option>
+                        <option value="due7days">Due Soon (' . $warningDays . 'd)</option>
+                        <option value="today">Due Today</option>
+                        <option value="overdue">Overdue</option>
+                        <option value="suspended">Suspended</option>
+                        <option value="paid">Paid</option>
+                    </select>
                     <button class="btn btn-primary" onclick="openAddCustomerModal()"><i class="fas fa-plus"></i> Add Clients to Ledger</button>
                 </div>
             </div>
             <div style="overflow-x:auto;">
-                <table class="csm-table">
+                <table class="csm-table" id="csmLedgerTable">
                     <thead>
                         <tr>
+                            <th width="60">ID</th>
                             <th>Client &amp; Contact</th>
                             <th>Service / Domain</th>
                             <th>Billing Amount</th>
                             <th>Cycle</th>
-                            <th>Due Date</th>
-                            <th>Status</th>
+                            <th>Next Due Date</th>
                             <th>Due Note / Remarks</th>
-                            <th width="80" class="text-center">Actions</th>
+                            <th>Status</th>
+                            <th width="85" class="text-center">Actions</th>
                         </tr>
                     </thead>
-                    <tbody>';
+                    <tbody id="csmLedgerTableBody">';
 
         if ($customers->isEmpty()) {
-            $html .= '<tr><td colspan="8" style="text-align:center;padding:40px;color:#64748b;">
-                <i class="fas fa-folder-open" style="font-size:32px;margin-bottom:10px;display:block;opacity:0.5;"></i>
-                No ledger entries found. Click <strong>"Add Clients to Ledger"</strong> to create records for WHMCS clients.
+            $html .= '<tr id="csmLedgerEmptyRow"><td colspan="9" style="text-align:center;padding:45px;color:#64748b;">
+                <i class="fas fa-folder-open" style="font-size:36px;margin-bottom:10px;display:block;opacity:0.4;"></i>
+                No ledger entries found. Click <strong>"Add Clients to Ledger"</strong> to create custom client records.
             </td></tr>';
         } else {
             foreach ($customers as $c) {
-                $statusClass = strtolower($c->status) === 'active' ? 'active' : (strtolower($c->status) === 'unpaid' ? 'overdue' : 'warning');
-                $rawPhone = str_replace('.', ' ', $c->phone ?: '');
-                $waPhone = preg_replace('/[^0-9]/', '', $c->phone ?: '');
-                $waBtn = !empty($waPhone) ? '<a href="https://wa.me/' . $waPhone . '" target="_blank" class="btn btn-success btn-xs" style="margin-left:4px;" title="WhatsApp"><i class="fab fa-whatsapp"></i></a>' : '';
+                $statusLower = strtolower($c->status);
+                $statusClass = $statusLower === 'active' ? 'active' : ($statusLower === 'unpaid' ? 'overdue' : ($statusLower === 'paid' ? 'active' : 'warning'));
+
+                // Phone formatting & cleaning (no dots)
+                $rawPhone = trim($c->phone ?: '');
+                $cleanDisplayPhone = str_replace('.', ' ', $rawPhone);
+                $cleanDisplayPhone = trim(preg_replace('/\s+/', ' ', $cleanDisplayPhone));
+                $digitsPhone = preg_replace('/[^0-9]/', '', str_replace('.', '', $rawPhone));
+
+                $intlPhone = '';
+                if (!empty($digitsPhone)) {
+                    if (substr($digitsPhone, 0, strlen($defaultCountryCode)) === $defaultCountryCode) {
+                        $intlPhone = $digitsPhone;
+                    } elseif (substr($digitsPhone, 0, 1) === '0') {
+                        $intlPhone = $defaultCountryCode . substr($digitsPhone, 1);
+                    } else {
+                        $intlPhone = $defaultCountryCode . $digitsPhone;
+                    }
+                }
+                $dialPhone = !empty($intlPhone) ? '+' . $intlPhone : (!empty($digitsPhone) ? '+' . $digitsPhone : '');
+
+                $waTemplate = csm_get_setting('wa_template', '');
+                $waMessage = str_replace(
+                    ['{client_name}', '{service_name}', '{domain}', '{due_date}', '{amount}'],
+                    [$c->customer_name, $c->service_name, $c->domain ?: 'N/A', $c->next_due_date ? date('d/m/Y', strtotime($c->next_due_date)) : 'N/A', $currPrefix . number_format((float)$c->amount, 2) . $currSuffix],
+                    $waTemplate
+                );
+                $waUrl = !empty($intlPhone) ? 'https://wa.me/' . $intlPhone . '?text=' . urlencode($waMessage) : '';
+
+                $callBtn = !empty($dialPhone) ? '<a href="tel:' . csm_h($dialPhone) . '" class="btn btn-primary btn-xs" title="Direct Call ' . csm_h($dialPhone) . '" style="background:#0284c7;border-color:#0284c7;color:#fff;"><i class="fas fa-phone"></i></a>' : '';
+                $waBtn = !empty($waUrl) ? '<a href="' . csm_h($waUrl) . '" target="_blank" class="btn btn-success btn-xs" title="WhatsApp Reminder"><i class="fab fa-whatsapp"></i></a>' : '';
+                $copyBtn = !empty($cleanDisplayPhone) ? '<button type="button" class="btn btn-default btn-xs" onclick="csmCopyText(\'' . csm_h(addslashes($cleanDisplayPhone)) . '\')" title="Copy Phone"><i class="far fa-copy"></i></button>' : '';
 
                 $clientLink = '';
                 if (!empty($c->userid)) {
                     $clientLink = '<a href="clientssummary.php?userid=' . (int)$c->userid . '" target="_blank" style="font-weight:700;color:#0f5ea8;">' . csm_h($c->customer_name) . '</a> <a href="clientssummary.php?userid=' . (int)$c->userid . '" target="_blank" class="btn btn-default btn-xs" style="margin-left:4px;padding:1px 6px;font-size:10px;" title="WHMCS Client Profile"><i class="fas fa-user-check text-primary"></i> #' . (int)$c->userid . '</a>';
                 } else {
-                    $clientLink = '<strong>' . csm_h($c->customer_name) . '</strong>';
+                    $clientLink = '<strong style="color:#1e293b;">' . csm_h($c->customer_name) . '</strong> <span class="label label-default" style="font-size:10px;">Offline</span>';
                 }
 
-                // Get latest note
+                // Due date calculation & badge
+                $dueBadge = '';
+                $dueCategory = 'normal';
+                if (!empty($c->next_due_date) && $c->next_due_date !== '0000-00-00') {
+                    $dueTs = strtotime($c->next_due_date);
+                    $diff = (int)round(($dueTs - $todayTs) / 86400);
+
+                    if ($diff < 0) {
+                        $dueCategory = 'overdue';
+                        $dueBadge = '<span class="csm-badge csm-badge-overdue">' . abs($diff) . 'd Overdue</span>';
+                    } elseif ($diff === 0) {
+                        $dueCategory = 'today';
+                        $dueBadge = '<span class="csm-badge csm-badge-warning">Due Today</span>';
+                    } elseif ($diff <= $warningDays) {
+                        $dueCategory = 'due7days';
+                        $dueBadge = '<span class="csm-badge csm-badge-warning">' . $diff . 'd Left</span>';
+                    } else {
+                        $dueBadge = '<small class="text-muted">' . $diff . 'd left</small>';
+                    }
+                }
+
+                // Latest note
                 $latestNote = Capsule::table('mod_csm_service_notes')
                     ->where('rel_type', 'custom_customer')
                     ->where('rel_id', $c->id)
                     ->orderBy('id', 'DESC')
                     ->first();
 
-                $notePreview = $latestNote ? '<span class="label label-info" style="font-size:11px;" title="' . csm_h($latestNote->note) . '"><i class="fas fa-note-sticky"></i> ' . csm_h(substr($latestNote->note, 0, 20)) . '...</span>' : '<span style="color:#94a3b8;font-size:11px;">No note</span>';
+                $notePreview = $latestNote ? '<span class="label label-info" style="font-size:11px;" title="' . csm_h($latestNote->note) . '"><i class="fas fa-note-sticky"></i> ' . csm_h(substr($latestNote->note, 0, 16)) . '...</span>' : '<span style="color:#94a3b8;font-size:11px;">No note</span>';
 
-                $html .= '<tr>
+                $searchCorpus = strtolower($c->id . ' ' . $c->customer_name . ' ' . $c->company_name . ' ' . $c->email . ' ' . $cleanDisplayPhone . ' ' . $c->service_name . ' ' . $c->domain . ' ' . $c->status . ' ' . ($latestNote ? $latestNote->note : ''));
+
+                $html .= '<tr class="csm-ledger-row" data-search="' . csm_h($searchCorpus) . '" data-status="' . csm_h($statusLower) . '" data-due="' . csm_h($dueCategory) . '">
+                    <td><strong>#' . $c->id . '</strong></td>
                     <td>
                         ' . $clientLink . '
-                        ' . ($c->company_name ? '<br><small class="text-muted">' . csm_h($c->company_name) . '</small>' : '') . '
-                        <br><small><i class="fas fa-phone"></i> ' . csm_h($rawPhone ?: 'N/A') . '</small> ' . $waBtn . '
+                        ' . ($c->company_name ? '<br><small class="text-muted"><i class="fas fa-building"></i> ' . csm_h($c->company_name) . '</small>' : '') . '
+                        ' . ($c->email ? '<br><small><a href="mailto:' . csm_h($c->email) . '" style="color:#64748b;"><i class="fas fa-envelope"></i> ' . csm_h($c->email) . '</a></small>' : '') . '
+                        <div style="margin-top:4px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+                            <span style="font-size:11.5px;font-weight:700;color:#334155;"><i class="fas fa-phone"></i> ' . csm_h($cleanDisplayPhone ?: 'N/A') . '</span>
+                            ' . $callBtn . ' ' . $waBtn . ' ' . $copyBtn . '
+                        </div>
                     </td>
                     <td>
                         <strong>' . csm_h($c->service_name) . '</strong>
-                        ' . ($c->domain ? '<br><small style="color:#1d4ed8;"><i class="fas fa-globe"></i> ' . csm_h($c->domain) . '</small>' : '') . '
+                        ' . ($c->domain ? '<br><a href="http://' . csm_h($c->domain) . '" target="_blank" style="color:#1d4ed8;font-size:12px;font-weight:600;"><i class="fas fa-globe"></i> ' . csm_h($c->domain) . '</a>' : '') . '
                     </td>
-                    <td><strong>' . $currPrefix . number_format((float)$c->amount, 2) . $currSuffix . '</strong></td>
-                    <td>' . csm_h($c->billing_cycle) . '</td>
-                    <td>' . ($c->next_due_date ? date('d/m/Y', strtotime($c->next_due_date)) : 'N/A') . '</td>
+                    <td><strong style="color:#1e293b;font-size:14px;">' . $currPrefix . number_format((float)$c->amount, 2) . $currSuffix . '</strong></td>
+                    <td><span class="label label-default" style="font-size:11px;">' . csm_h($c->billing_cycle) . '</span></td>
+                    <td>
+                        <strong>' . ($c->next_due_date ? date('d/m/Y', strtotime($c->next_due_date)) : 'N/A') . '</strong>
+                        ' . ($dueBadge ? '<br>' . $dueBadge : '') . '
+                    </td>
+                    <td>' . $notePreview . ' <button class="btn btn-default btn-xs" onclick="openNoteModal(\'custom_customer\', ' . $c->id . ', \'' . csm_h(addslashes($c->customer_name . ' (#' . $c->id . ')')) . '\', ' . (float)$c->amount . ')" title="Add / View Note"><i class="fas fa-edit"></i></button></td>
                     <td><span class="csm-badge csm-badge-' . $statusClass . '">' . csm_h($c->status) . '</span></td>
-                    <td>' . $notePreview . ' <button class="btn btn-default btn-xs" onclick="openNoteModal(\'custom_customer\', ' . $c->id . ', \'' . csm_h(addslashes($c->customer_name)) . '\', ' . (float)$c->amount . ')" title="Add / View Note"><i class="fas fa-edit"></i></button></td>
                     <td class="text-center" style="white-space:nowrap;">
-                        <button class="btn btn-default btn-xs" onclick=\'editCustomer(' . json_encode($c) . ')\' title="Edit"><i class="fas fa-pen"></i></button>
-                        <a href="' . csm_h($moduleLink) . '&action=delete_custom_customer&id=' . $c->id . '" class="btn btn-danger btn-xs" onclick="return csmConfirmDelete(this.href, \'Delete this ledger record and associated notes?\')" title="Delete"><i class="fas fa-trash"></i></a>
+                        <button class="btn btn-default btn-xs" onclick=\'editCustomer(' . json_encode($c) . ')\' title="Edit Ledger Entry"><i class="fas fa-pen"></i></button>
+                        <a href="' . csm_h($moduleLink) . '&action=delete_custom_customer&id=' . $c->id . '" class="btn btn-danger btn-xs" onclick="return csmConfirmDelete(this.href, \'Delete this ledger record and its associated payment notes permanently?\')" title="Delete"><i class="fas fa-trash"></i></a>
                     </td>
                 </tr>';
             }
@@ -892,81 +1014,121 @@ if (!function_exists('csm_render_custom_customers_page')) {
             foreach ($existingClients as $cl) {
                 $phoneClean = str_replace('.', ' ', $cl->phonenumber ?: '');
                 $compClean = $cl->companyname ? ' (' . $cl->companyname . ')' : '';
-                $clientOptionsHtml .= '<option value="' . $cl->id . '">'
-                    . '#' . $cl->id . ' - ' . csm_h(trim($cl->firstname . ' ' . $cl->lastname)) . csm_h($compClean) . ' - ' . csm_h($cl->email) . ($phoneClean ? ' | ' . csm_h($phoneClean) : '')
+                $fullName = trim($cl->firstname . ' ' . $cl->lastname);
+                $clientOptionsHtml .= '<option value="' . $cl->id . '"'
+                    . ' data-name="' . csm_h($fullName) . '"'
+                    . ' data-company="' . csm_h($cl->companyname ?: '') . '"'
+                    . ' data-email="' . csm_h($cl->email ?: '') . '"'
+                    . ' data-phone="' . csm_h($phoneClean) . '">'
+                    . '#' . $cl->id . ' - ' . csm_h($fullName) . csm_h($compClean) . ' - ' . csm_h($cl->email) . ($phoneClean ? ' | ' . csm_h($phoneClean) : '')
                     . '</option>';
             }
         }
 
         $html .= '
         <div id="csmCustomerModal" class="modal fade" tabindex="-1" role="dialog" style="display:none;">
-            <div class="modal-dialog modal-md" role="document">
-                <div class="modal-content" style="border-radius:8px;">
-                    <form method="post" action="' . csm_h($moduleLink) . '&action=save_custom_customer">
+            <div class="modal-dialog modal-lg" role="document">
+                <div class="modal-content" style="border-radius:10px;overflow:hidden;">
+                    <form method="post" action="' . csm_h($moduleLink) . '&action=save_custom_customer" id="csmCustomerForm">
                         <input type="hidden" name="customer_id" id="modalCustomerId" value="0">
                         <input type="hidden" name="userid" id="csmCustUserId" value="0">
-                        <div class="modal-header" style="background:#12589b;color:#fff;border-radius:7px 7px 0 0;">
-                            <button type="button" class="close" data-dismiss="modal" style="color:#fff;opacity:0.9;">&times;</button>
-                            <h4 class="modal-title" id="modalCustomerTitle"><i class="fas fa-users-gear"></i> Add Clients to Ledger</h4>
+                        <div class="modal-header" style="background:#12589b;color:#fff;padding:16px 22px;">
+                            <button type="button" class="close" data-dismiss="modal" style="color:#fff;opacity:0.9;font-size:24px;">&times;</button>
+                            <h4 class="modal-title" id="modalCustomerTitle" style="font-weight:700;"><i class="fas fa-users-gear"></i> Add Clients to Ledger</h4>
                         </div>
-                        <div class="modal-body" style="padding:20px;">
-                            <div class="form-group" style="background:#f8fafc;padding:12px;border-radius:6px;border:1px solid #cbd5e1;margin-bottom:16px;">
-                                <label style="color:#0f5ea8;font-weight:700;"><i class="fas fa-users"></i> Search &amp; Select WHMCS Client(s) <span class="text-danger">*</span></label>
-                                <select name="client_ids[]" id="csmSelectClients" class="form-control" multiple="multiple" style="width:100%;" required>
+                        <div class="modal-body" style="padding:22px;background:#f8fafc;">
+                            <div class="form-group" style="background:#ffffff;padding:14px;border-radius:8px;border:1px solid #cbd5e1;box-shadow:0 2px 4px rgba(0,0,0,0.02);margin-bottom:18px;">
+                                <label style="color:#0f5ea8;font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:6px;">
+                                    <i class="fas fa-search"></i> Search &amp; Select Existing WHMCS Client(s)
+                                </label>
+                                <select name="client_ids[]" id="csmSelectClients" class="form-control" multiple="multiple" style="width:100%;">
                                     ' . $clientOptionsHtml . '
                                 </select>
                                 <small class="text-muted" style="display:block;margin-top:6px;">
-                                    <i class="fas fa-search"></i> Search by client name, email, phone, or company. Select one or multiple clients.
+                                    <i class="fas fa-info-circle text-primary"></i> Selecting a WHMCS client auto-fills their name, company, email, and phone below. You can also leave this empty to add an offline/custom client directly.
                                 </small>
                             </div>
 
-                            <div class="row">
-                                <div class="col-md-6 form-group">
-                                    <label>Service / Item Title <span class="text-danger">*</span></label>
-                                    <input type="text" name="service_name" id="csmCustService" class="form-control" required placeholder="e.g. Dedicated Server / Web Maintenance">
+                            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin-bottom:15px;">
+                                <h5 style="font-weight:800;color:#0f5ea8;margin-top:0;margin-bottom:14px;border-bottom:1px solid #f1f5f9;padding-bottom:6px;">
+                                    <i class="fas fa-user-tag"></i> 1. Client Information
+                                </h5>
+                                <div class="row">
+                                    <div class="col-md-6 form-group">
+                                        <label>Client / Customer Name <span class="text-danger">*</span></label>
+                                        <input type="text" name="customer_name" id="csmCustName" class="form-control" required placeholder="e.g. John Doe / Siyam Sam">
+                                    </div>
+                                    <div class="col-md-6 form-group">
+                                        <label>Company Name (Optional)</label>
+                                        <input type="text" name="company_name" id="csmCustCompany" class="form-control" placeholder="e.g. Acme Corporation">
+                                    </div>
                                 </div>
-                                <div class="col-md-6 form-group">
-                                    <label>Domain Name (Optional)</label>
-                                    <input type="text" name="domain" id="csmCustDomain" class="form-control" placeholder="e.g. clientdomain.com">
-                                </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-4 form-group">
-                                    <label>Amount / Due (৳) <span class="text-danger">*</span></label>
-                                    <input type="number" step="0.01" name="amount" id="csmCustAmount" class="form-control" value="0.00" required>
-                                </div>
-                                <div class="col-md-4 form-group">
-                                    <label>Billing Cycle</label>
-                                    <select name="billing_cycle" id="csmCustCycle" class="form-control">
-                                        <option value="Monthly">Monthly</option>
-                                        <option value="Quarterly">Quarterly</option>
-                                        <option value="Semi-Annually">Semi-Annually</option>
-                                        <option value="Annually">Annually</option>
-                                        <option value="One Time">One Time</option>
-                                    </select>
-                                </div>
-                                <div class="col-md-4 form-group">
-                                    <label>Next Due Date</label>
-                                    <input type="date" name="next_due_date" id="csmCustDueDate" class="form-control">
+                                <div class="row">
+                                    <div class="col-md-6 form-group">
+                                        <label>Phone / WhatsApp Number</label>
+                                        <input type="text" name="phone" id="csmCustPhone" class="form-control" placeholder="e.g. 01911-726447 or +8801911726447">
+                                    </div>
+                                    <div class="col-md-6 form-group">
+                                        <label>Email Address (Optional)</label>
+                                        <input type="email" name="email" id="csmCustEmail" class="form-control" placeholder="e.g. client@example.com">
+                                    </div>
                                 </div>
                             </div>
-                            <div class="row">
-                                <div class="col-md-6 form-group">
-                                    <label>Status</label>
-                                    <select name="status" id="csmCustStatus" class="form-control">
-                                        <option value="Active">Active</option>
-                                        <option value="Unpaid">Unpaid</option>
-                                        <option value="Suspended">Suspended</option>
-                                        <option value="Paid">Paid</option>
-                                    </select>
+
+                            <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:16px;">
+                                <h5 style="font-weight:800;color:#0f5ea8;margin-top:0;margin-bottom:14px;border-bottom:1px solid #f1f5f9;padding-bottom:6px;">
+                                    <i class="fas fa-box-archive"></i> 2. Service Details, Billing &amp; Due Schedule
+                                </h5>
+                                <div class="row">
+                                    <div class="col-md-6 form-group">
+                                        <label>Service / Item Title <span class="text-danger">*</span></label>
+                                        <input type="text" name="service_name" id="csmCustService" class="form-control" required placeholder="e.g. Dedicated Server Support / Web Development">
+                                    </div>
+                                    <div class="col-md-6 form-group">
+                                        <label>Domain Name (Optional)</label>
+                                        <input type="text" name="domain" id="csmCustDomain" class="form-control" placeholder="e.g. example.com">
+                                    </div>
                                 </div>
-                                <div class="col-md-6 form-group">
-                                    <label>Initial Note / Remarks</label>
-                                    <input type="text" name="notes" id="csmCustNotes" class="form-control" placeholder="e.g. Paid 500 Tk advance, remaining 500 Tk due">
+                                <div class="row">
+                                    <div class="col-md-4 form-group">
+                                        <label>Amount / Fee (' . csm_h(trim($currPrefix . $currSuffix)) . ') <span class="text-danger">*</span></label>
+                                        <input type="number" step="0.01" name="amount" id="csmCustAmount" class="form-control" value="0.00" required>
+                                    </div>
+                                    <div class="col-md-4 form-group">
+                                        <label>Billing Cycle</label>
+                                        <select name="billing_cycle" id="csmCustCycle" class="form-control">
+                                            <option value="Monthly">Monthly</option>
+                                            <option value="Quarterly">Quarterly</option>
+                                            <option value="Semi-Annually">Semi-Annually</option>
+                                            <option value="Annually">Annually</option>
+                                            <option value="Biennially">Biennially</option>
+                                            <option value="One Time">One Time</option>
+                                            <option value="Free Account">Free Account</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4 form-group">
+                                        <label>Next Due Date</label>
+                                        <input type="date" name="next_due_date" id="csmCustDueDate" class="form-control">
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6 form-group">
+                                        <label>Status</label>
+                                        <select name="status" id="csmCustStatus" class="form-control">
+                                            <option value="Active">Active</option>
+                                            <option value="Unpaid">Unpaid</option>
+                                            <option value="Suspended">Suspended</option>
+                                            <option value="Paid">Paid</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6 form-group">
+                                        <label>Initial Due Note / Remark</label>
+                                        <input type="text" name="notes" id="csmCustNotes" class="form-control" placeholder="e.g. Advance paid 500 Tk, balance due on 1st">
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                        <div class="modal-footer" style="background:#f8fafc;">
+                        <div class="modal-footer" style="background:#f1f5f9;">
                             <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
                             <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save to Ledger</button>
                         </div>
@@ -975,7 +1137,71 @@ if (!function_exists('csm_render_custom_customers_page')) {
             </div>
         </div>
 
+        <!-- Universal Note Modal for Custom Customer & Service Ledger -->
+        <div class="modal fade" id="csmNoteModal" tabindex="-1" role="dialog">
+            <div class="modal-dialog modal-md" role="document">
+                <div class="modal-content" style="border-radius:8px;">
+                    <div class="modal-header" style="background:#12589b;color:#fff;border-radius:7px 7px 0 0;">
+                        <button type="button" class="close" data-dismiss="modal" style="color:#fff;">&times;</button>
+                        <h4 class="modal-title"><i class="fas fa-book-bookmark"></i> Service Due Note &amp; Ledger</h4>
+                    </div>
+                    <div class="modal-body" style="padding:20px;">
+                        <div class="form-group">
+                            <label>Target Service / Client:</label>
+                            <input type="text" id="modalNoteTarget" class="form-control" readonly style="background:#f8fafc;font-weight:700;">
+                            <input type="hidden" id="modalNoteRelType" value="custom_customer">
+                            <input type="hidden" id="modalNoteRelId" value="0">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Add New Note / Payment Remark <span class="text-danger">*</span></label>
+                            <textarea id="modalNoteText" class="form-control" rows="2" placeholder="e.g. Paid 500 Tk via bKash, remaining due on 25th"></textarea>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-4 form-group">
+                                <label>Paid Amount</label>
+                                <input type="number" step="0.01" id="modalNotePaid" class="form-control" placeholder="0.00">
+                            </div>
+                            <div class="col-md-4 form-group">
+                                <label>Remaining Due</label>
+                                <input type="number" step="0.01" id="modalNoteDue" class="form-control" placeholder="0.00">
+                            </div>
+                            <div class="col-md-4 form-group">
+                                <label>Promised Date</label>
+                                <input type="date" id="modalNotePromised" class="form-control">
+                            </div>
+                        </div>
+
+                        <button type="button" class="btn btn-primary btn-block" id="btnSaveNoteAjax" onclick="csmSaveLedgerNoteAjax()">
+                            <i class="fas fa-plus"></i> Save Note / Record Entry
+                        </button>
+
+                        <!-- Previous Notes History -->
+                        <div style="margin-top:20px;">
+                            <h5 style="font-weight:800;color:#1e293b;border-bottom:1px solid #e2e8f0;padding-bottom:6px;">
+                                <i class="fas fa-history"></i> Previous Notes History
+                            </h5>
+                            <div id="modalNotesHistoryList" style="max-height:180px;overflow-y:auto;font-size:12px;margin-top:8px;">
+                                <p class="text-muted">Loading history...</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer" style="background:#f8fafc;">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <script>
+        var CSM_MODULE_LINK = "' . addslashes($moduleLink) . '";
+        var CSM_NOTE_URL = CSM_MODULE_LINK + "&ajax=save_note";
+        var CSM_EDIT_NOTE_URL = CSM_MODULE_LINK + "&ajax=edit_note";
+        var CSM_DELETE_NOTE_URL = CSM_MODULE_LINK + "&ajax=delete_note";
+        var CSM_GET_NOTES_URL = CSM_MODULE_LINK + "&ajax=get_notes";
+        var currentEditingNoteId = 0;
+
         $(document).ready(function() {
             if ($.fn.select2) {
                 $("#csmSelectClients").select2({
@@ -984,14 +1210,107 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     width: "100%",
                     dropdownParent: $("#csmCustomerModal")
                 });
+
+                $("#csmSelectClients").on("change", function() {
+                    var selectedVals = $(this).val() || [];
+                    if (selectedVals.length === 1) {
+                        var $opt = $("#csmSelectClients option[value=\'" + selectedVals[0] + "\']");
+                        if ($opt.length) {
+                            $("#csmCustUserId").val(selectedVals[0]);
+                            $("#csmCustName").val($opt.data("name") || "");
+                            $("#csmCustCompany").val($opt.data("company") || "");
+                            $("#csmCustPhone").val($opt.data("phone") || "");
+                            $("#csmCustEmail").val($opt.data("email") || "");
+                        }
+                    } else if (selectedVals.length > 1) {
+                        $("#csmCustUserId").val("0");
+                        if (!$("#csmCustName").val()) {
+                            $("#csmCustName").val("Batch (" + selectedVals.length + " Clients)");
+                        }
+                    }
+                });
             }
+
+            // Live Table Search & Filter
+            $("#ledgerSearchInput").on("input", function() {
+                applyLedgerFilters();
+            });
+
+            $("#ledgerSearchClear").on("click", function() {
+                $("#ledgerSearchInput").val("");
+                applyLedgerFilters();
+            });
+
+            $("#ledgerStatusFilter").on("change", function() {
+                applyLedgerFilters();
+            });
         });
+
+        function applyLedgerFilters() {
+            var search = ($("#ledgerSearchInput").val() || "").toLowerCase().trim();
+            var statusFilter = ($("#ledgerStatusFilter").val() || "").toLowerCase().trim();
+            var visibleCount = 0;
+
+            $(".csm-ledger-row").each(function() {
+                var $row = $(this);
+                var rowSearch = $row.data("search") || "";
+                var rowStatus = ($row.data("status") || "").toString().toLowerCase();
+                var rowDue = ($row.data("due") || "").toString().toLowerCase();
+
+                var matchesSearch = !search || rowSearch.indexOf(search) > -1;
+                var matchesStatus = true;
+
+                if (statusFilter) {
+                    if (statusFilter === "due7days" || statusFilter === "today" || statusFilter === "overdue") {
+                        matchesStatus = (rowDue === statusFilter);
+                    } else {
+                        matchesStatus = (rowStatus === statusFilter);
+                    }
+                }
+
+                if (matchesSearch && matchesStatus) {
+                    $row.show();
+                    visibleCount++;
+                } else {
+                    $row.hide();
+                }
+            });
+
+            if (visibleCount === 0 && $(".csm-ledger-row").length > 0) {
+                if ($("#csmLedgerNoMatchRow").length === 0) {
+                    $("#csmLedgerTableBody").append("<tr id=\'csmLedgerNoMatchRow\'><td colspan=\'9\' style=\'text-align:center;padding:30px;color:#64748b;\'><i class=\'fas fa-search\'></i> No ledger records match your filter.</td></tr>");
+                }
+                $("#csmLedgerNoMatchRow").show();
+            } else {
+                $("#csmLedgerNoMatchRow").hide();
+            }
+        }
+
+        window.csmFilterLedger = function(statusVal) {
+            $("#ledgerStatusFilter").val(statusVal);
+            applyLedgerFilters();
+        };
+
+        window.csmCopyText = function(text) {
+            if (!text) return;
+            navigator.clipboard.writeText(text);
+            if (typeof Swal !== "undefined") {
+                const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 2000, timerProgressBar: true });
+                Toast.fire({ icon: "success", title: "Copied: " + text });
+            } else {
+                alert("Copied: " + text);
+            }
+        };
 
         function openAddCustomerModal() {
             document.getElementById("modalCustomerId").value = "0";
             document.getElementById("csmCustUserId").value = "0";
             document.getElementById("modalCustomerTitle").innerHTML = "<i class=\'fas fa-user-plus\'></i> Add Clients to Ledger";
             $("#csmSelectClients").val(null).trigger("change");
+            document.getElementById("csmCustName").value = "";
+            document.getElementById("csmCustCompany").value = "";
+            document.getElementById("csmCustPhone").value = "";
+            document.getElementById("csmCustEmail").value = "";
             document.getElementById("csmCustService").value = "";
             document.getElementById("csmCustDomain").value = "";
             document.getElementById("csmCustAmount").value = "0.00";
@@ -1005,12 +1324,16 @@ if (!function_exists('csm_render_custom_customers_page')) {
         function editCustomer(item) {
             document.getElementById("modalCustomerId").value = item.id;
             document.getElementById("csmCustUserId").value = item.userid || "0";
-            document.getElementById("modalCustomerTitle").innerHTML = "<i class=\'fas fa-edit\'></i> Edit Ledger Entry";
+            document.getElementById("modalCustomerTitle").innerHTML = "<i class=\'fas fa-edit\'></i> Edit Ledger Entry (#" + item.id + ")";
             if (item.userid) {
                 $("#csmSelectClients").val([String(item.userid)]).trigger("change");
             } else {
                 $("#csmSelectClients").val(null).trigger("change");
             }
+            document.getElementById("csmCustName").value = item.customer_name || "";
+            document.getElementById("csmCustCompany").value = item.company_name || "";
+            document.getElementById("csmCustPhone").value = item.phone || "";
+            document.getElementById("csmCustEmail").value = item.email || "";
             document.getElementById("csmCustService").value = item.service_name || "";
             document.getElementById("csmCustDomain").value = item.domain || "";
             document.getElementById("csmCustAmount").value = item.amount || "0.00";
@@ -1020,6 +1343,170 @@ if (!function_exists('csm_render_custom_customers_page')) {
             document.getElementById("csmCustNotes").value = item.notes || "";
             $("#csmCustomerModal").modal("show");
         }
+
+        // Note Handling on Ledger Page
+        window.openNoteModal = function(relType, relId, targetName, dueAmount) {
+            currentEditingNoteId = 0;
+            $("#modalNoteRelType").val(relType);
+            $("#modalNoteRelId").val(relId);
+            $("#modalNoteTarget").val(targetName);
+            $("#modalNoteText").val("");
+            $("#modalNotePaid").val("");
+            $("#modalNoteDue").val(dueAmount || "");
+            $("#modalNotePromised").val("");
+            $("#btnSaveNoteAjax").html("<i class=\'fas fa-plus\'></i> Save Note / Record Entry");
+            $("#modalNotesHistoryList").html("<p class=\'text-muted\'><i class=\'fas fa-spinner fa-spin\'></i> Loading history...</p>");
+
+            loadLedgerNotesHistory(relType, relId);
+            $("#csmNoteModal").modal("show");
+        };
+
+        function loadLedgerNotesHistory(relType, relId) {
+            $.ajax({
+                url: CSM_GET_NOTES_URL + "&rel_type=" + encodeURIComponent(relType) + "&rel_id=" + encodeURIComponent(relId),
+                type: "GET",
+                dataType: "json",
+                success: function(res) {
+                    if (res && res.success && res.notes && res.notes.length > 0) {
+                        var histHtml = "";
+                        res.notes.forEach(function(n) {
+                            var nJson = $("<div>").text(JSON.stringify(n)).html();
+                            histHtml += "<div style=\'background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;margin-bottom:8px;\'>" +
+                                "<div style=\'display:flex;justify-content:space-between;align-items:flex-start;\'>" +
+                                "<div style=\'font-weight:700;color:#1e293b;flex-grow:1;padding-right:10px;\'>" + $("<div>").text(n.note).html() + "</div>" +
+                                "<div style=\'white-space:nowrap;display:flex;gap:4px;\'>" +
+                                "<button type=\'button\' class=\'btn btn-default btn-xs\' onclick=\'csmInlineEditLedgerNote(" + n.id + ", " + nJson + ")\' title=\'Edit Note\'><i class=\'fas fa-edit text-primary\'></i></button>" +
+                                "<button type=\'button\' class=\'btn btn-danger btn-xs\' onclick=\'csmInlineDeleteLedgerNote(" + n.id + ")\' title=\'Delete Note\'><i class=\'fas fa-trash\'></i></button>" +
+                                "</div>" +
+                                "</div>" +
+                                "<div style=\'font-size:11px;color:#64748b;margin-top:4px;\'>" +
+                                (n.paid_amount ? "<span style=\'color:#16a34a;font-weight:700;\'>Paid: " + n.paid_amount + "</span> &bull; " : "") +
+                                (n.due_amount ? "<span style=\'color:#dc2626;font-weight:700;\'>Due: " + n.due_amount + "</span> &bull; " : "") +
+                                (n.promised_date ? "<span style=\'color:#2563eb;font-weight:600;\'>Promised: " + n.promised_date + "</span> &bull; " : "") +
+                                "<span>" + n.created_at + " (" + (n.admin_name || "Admin") + ")</span>" +
+                                "</div></div>";
+                        });
+                        $("#modalNotesHistoryList").html(histHtml);
+                    } else {
+                        $("#modalNotesHistoryList").html("<p class=\'text-muted\' style=\'margin:0;\'>No previous notes recorded.</p>");
+                    }
+                }
+            });
+        }
+
+        window.csmInlineEditLedgerNote = function(noteId, noteObj) {
+            currentEditingNoteId = noteId;
+            $("#modalNoteText").val(noteObj.note || "");
+            $("#modalNotePaid").val(noteObj.paid_amount || "");
+            $("#modalNoteDue").val(noteObj.due_amount || "");
+            $("#modalNotePromised").val(noteObj.promised_date || "");
+            $("#btnSaveNoteAjax").html("<i class=\'fas fa-save\'></i> Update Note Entry");
+            $("#modalNoteText").focus();
+        };
+
+        window.csmInlineDeleteLedgerNote = function(noteId) {
+            if (typeof Swal !== "undefined") {
+                Swal.fire({
+                    title: "Delete Note Entry?",
+                    text: "Are you sure you want to delete this note permanently?",
+                    icon: "warning",
+                    showCancelButton: true,
+                    confirmButtonColor: "#dc2626",
+                    cancelButtonColor: "#64748b",
+                    confirmButtonText: "Yes, Delete"
+                }).then(function(result) {
+                    if (result.isConfirmed) {
+                        performDeleteNoteAjax(noteId);
+                    }
+                });
+            } else {
+                if (confirm("Delete this note permanently?")) {
+                    performDeleteNoteAjax(noteId);
+                }
+            }
+        };
+
+        function performDeleteNoteAjax(noteId) {
+            $.ajax({
+                url: CSM_DELETE_NOTE_URL,
+                type: "POST",
+                data: { note_id: noteId },
+                dataType: "json",
+                success: function(res) {
+                    if (res && res.success) {
+                        if (typeof Swal !== "undefined") {
+                            const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 2000 });
+                            Toast.fire({ icon: "success", title: "Note deleted successfully" });
+                        }
+                        var relType = $("#modalNoteRelType").val();
+                        var relId = $("#modalNoteRelId").val();
+                        loadLedgerNotesHistory(relType, relId);
+                    }
+                }
+            });
+        }
+
+        window.csmSaveLedgerNoteAjax = function() {
+            var relType = $("#modalNoteRelType").val();
+            var relId = $("#modalNoteRelId").val();
+            var note = $("#modalNoteText").val().trim();
+            var paid = $("#modalNotePaid").val();
+            var due = $("#modalNoteDue").val();
+            var promised = $("#modalNotePromised").val();
+
+            if (!note) {
+                if (typeof Swal !== "undefined") {
+                    Swal.fire({ icon: "warning", title: "Note Required", text: "Please enter a note / remark text before saving." });
+                } else {
+                    alert("Please enter a note / remark text before saving.");
+                }
+                return;
+            }
+
+            var isEditing = currentEditingNoteId > 0;
+            var targetUrl = isEditing ? CSM_EDIT_NOTE_URL : CSM_NOTE_URL;
+            var postData = {
+                rel_type: relType,
+                rel_id: relId,
+                note: note,
+                paid_amount: paid,
+                due_amount: due,
+                promised_date: promised
+            };
+            if (isEditing) {
+                postData.note_id = currentEditingNoteId;
+            }
+
+            $("#btnSaveNoteAjax").prop("disabled", true).html("<i class=\'fas fa-spinner fa-spin\'></i> Saving...");
+
+            $.ajax({
+                url: targetUrl,
+                type: "POST",
+                data: postData,
+                dataType: "json",
+                success: function(res) {
+                    $("#btnSaveNoteAjax").prop("disabled", false).html("<i class=\'fas fa-plus\'></i> Save Note / Record Entry");
+                    if (res && res.success) {
+                        if (typeof Swal !== "undefined") {
+                            const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 2000 });
+                            Toast.fire({ icon: "success", title: isEditing ? "Note updated successfully" : "Note added successfully" });
+                        }
+                        currentEditingNoteId = 0;
+                        $("#modalNoteText").val("");
+                        $("#modalNotePaid").val("");
+                        $("#modalNotePromised").val("");
+                        loadLedgerNotesHistory(relType, relId);
+                    } else {
+                        if (typeof Swal !== "undefined") {
+                            Swal.fire({ icon: "error", title: "Save Failed", text: res.error || "Failed to save note." });
+                        }
+                    }
+                },
+                error: function() {
+                    $("#btnSaveNoteAjax").prop("disabled", false).html("<i class=\'fas fa-plus\'></i> Save Note / Record Entry");
+                }
+            });
+        };
         </script>';
 
         return $html;
@@ -1615,10 +2102,6 @@ if (!function_exists('client_services_monitor_output')) {
             if ($action === 'save_custom_customer') {
                 $cId = (int)($_POST['customer_id'] ?? 0);
                 $clientIds = isset($_POST['client_ids']) ? (array)$_POST['client_ids'] : [];
-                if (empty($clientIds) && !empty($_POST['userid'])) {
-                    $clientIds = [(int)$_POST['userid']];
-                }
-
                 $service = trim($_POST['service_name'] ?? 'Custom Service');
                 $domain = trim($_POST['domain'] ?? '');
                 $amount = (float)($_POST['amount'] ?? 0);
@@ -1628,17 +2111,20 @@ if (!function_exists('client_services_monitor_output')) {
                 $notes = trim($_POST['notes'] ?? '');
                 $now = date('Y-m-d H:i:s');
 
-                if ($cId > 0) {
-                    $userId = !empty($clientIds) ? (int)$clientIds[0] : (int)($_POST['userid'] ?? 0);
-                    $client = $userId > 0 ? Capsule::table('tblclients')->where('id', $userId)->first() : null;
-                    $name = $client ? trim($client->firstname . ' ' . $client->lastname) : trim($_POST['customer_name'] ?? 'Client #' . $userId);
-                    $company = $client ? $client->companyname : trim($_POST['company_name'] ?? '');
-                    $phone = $client ? $client->phonenumber : trim($_POST['phone'] ?? '');
-                    $email = $client ? $client->email : trim($_POST['email'] ?? '');
+                $name = trim($_POST['customer_name'] ?? '');
+                $company = trim($_POST['company_name'] ?? '');
+                $phone = trim($_POST['phone'] ?? '');
+                $email = trim($_POST['email'] ?? '');
+                $userId = (int)($_POST['userid'] ?? 0);
 
+                if ($cId > 0) {
+                    // Updating an existing record
+                    if (empty($userId) && !empty($clientIds)) {
+                        $userId = (int)$clientIds[0];
+                    }
                     Capsule::table('mod_csm_custom_customers')->where('id', $cId)->update([
                         'userid'        => $userId > 0 ? $userId : null,
-                        'customer_name' => $name,
+                        'customer_name' => !empty($name) ? $name : 'Custom Client',
                         'company_name'  => $company,
                         'phone'         => $phone,
                         'email'         => $email,
@@ -1652,19 +2138,21 @@ if (!function_exists('client_services_monitor_output')) {
                         'updated_at'    => $now,
                     ]);
                 } else {
-                    if (!empty($clientIds)) {
+                    // Adding new record(s)
+                    if (!empty($clientIds) && count($clientIds) > 1) {
+                        // Multi-client batch add
                         foreach ($clientIds as $uId) {
                             $uId = (int)$uId;
                             if ($uId <= 0) continue;
-                            $client = Capsule::table('tblclients')->where('id', $uId)->first();
-                            if (!$client) continue;
+                            $cl = Capsule::table('tblclients')->where('id', $uId)->first();
+                            if (!$cl) continue;
 
                             $newCustId = Capsule::table('mod_csm_custom_customers')->insertGetId([
                                 'userid'        => $uId,
-                                'customer_name' => trim($client->firstname . ' ' . $client->lastname),
-                                'company_name'  => $client->companyname ?: '',
-                                'phone'         => $client->phonenumber ?: '',
-                                'email'         => $client->email ?: '',
+                                'customer_name' => trim($cl->firstname . ' ' . $cl->lastname),
+                                'company_name'  => $cl->companyname ?: '',
+                                'phone'         => $cl->phonenumber ?: '',
+                                'email'         => $cl->email ?: '',
                                 'service_name'  => $service,
                                 'domain'        => $domain,
                                 'amount'        => $amount,
@@ -1686,6 +2174,48 @@ if (!function_exists('client_services_monitor_output')) {
                                     'updated_at' => $now,
                                 ]);
                             }
+                        }
+                    } else {
+                        // Single client (either selected from WHMCS or typed manually)
+                        if (empty($userId) && !empty($clientIds)) {
+                            $userId = (int)$clientIds[0];
+                        }
+                        if ($userId > 0 && empty($name)) {
+                            $cl = Capsule::table('tblclients')->where('id', $userId)->first();
+                            if ($cl) {
+                                $name = trim($cl->firstname . ' ' . $cl->lastname);
+                                if (empty($company)) $company = $cl->companyname ?: '';
+                                if (empty($phone)) $phone = $cl->phonenumber ?: '';
+                                if (empty($email)) $email = $cl->email ?: '';
+                            }
+                        }
+
+                        $newCustId = Capsule::table('mod_csm_custom_customers')->insertGetId([
+                            'userid'        => $userId > 0 ? $userId : null,
+                            'customer_name' => !empty($name) ? $name : 'Custom Client',
+                            'company_name'  => $company,
+                            'phone'         => $phone,
+                            'email'         => $email,
+                            'service_name'  => $service,
+                            'domain'        => $domain,
+                            'amount'        => $amount,
+                            'billing_cycle' => $cycle,
+                            'next_due_date' => $due,
+                            'status'        => $status,
+                            'notes'         => $notes,
+                            'created_at'    => $now,
+                            'updated_at'    => $now,
+                        ]);
+
+                        if (!empty($notes)) {
+                            Capsule::table('mod_csm_service_notes')->insert([
+                                'rel_type'   => 'custom_customer',
+                                'rel_id'     => $newCustId,
+                                'note'       => $notes,
+                                'due_amount' => $amount,
+                                'created_at' => $now,
+                                'updated_at' => $now,
+                            ]);
                         }
                     }
                 }
