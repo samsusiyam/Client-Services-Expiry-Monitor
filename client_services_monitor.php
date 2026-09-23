@@ -43,6 +43,7 @@ if (!function_exists('csm_ensure_tables')) {
             if (!Capsule::schema()->hasTable('mod_csm_custom_customers')) {
                 Capsule::schema()->create('mod_csm_custom_customers', function ($table) {
                     $table->increments('id');
+                    $table->unsignedInteger('userid')->nullable();
                     $table->string('customer_name', 255);
                     $table->string('company_name', 255)->nullable();
                     $table->string('email', 255)->nullable();
@@ -58,6 +59,12 @@ if (!function_exists('csm_ensure_tables')) {
                     $table->dateTime('created_at')->nullable();
                     $table->dateTime('updated_at')->nullable();
                 });
+            } else {
+                if (!Capsule::schema()->hasColumn('mod_csm_custom_customers', 'userid')) {
+                    Capsule::schema()->table('mod_csm_custom_customers', function ($table) {
+                        $table->unsignedInteger('userid')->nullable()->after('id');
+                    });
+                }
             }
 
             // 3. Service & Customer Due Notes / Ledger Table
@@ -73,7 +80,14 @@ if (!function_exists('csm_ensure_tables')) {
                     $table->unsignedInteger('admin_id')->nullable();
                     $table->string('admin_name', 100)->nullable();
                     $table->dateTime('created_at')->nullable();
+                    $table->dateTime('updated_at')->nullable();
                 });
+            } else {
+                if (!Capsule::schema()->hasColumn('mod_csm_service_notes', 'updated_at')) {
+                    Capsule::schema()->table('mod_csm_service_notes', function ($table) {
+                        $table->dateTime('updated_at')->nullable();
+                    });
+                }
             }
 
             // 4. Custom Suspension / Overdue Grace Overrides Table
@@ -581,7 +595,29 @@ if (!function_exists('csm_shared_css')) {
                 .csm-stats, .csm-check-grid { grid-template-columns: 1fr; }
                 .csm-nav-btn { width: 100%; justify-content: center; }
             }
-        </style>';
+        </style>
+        <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+        <script>
+        function csmConfirmDelete(url, text) {
+            if (typeof Swal !== "undefined") {
+                Swal.fire({
+                    title: "Are you sure?",
+                    text: text || "You will not be able to revert this!",
+                    icon: "warning",
+                    showCancelButton: true,
+                    confirmButtonColor: "#dc2626",
+                    cancelButtonColor: "#64748b",
+                    confirmButtonText: "Yes, delete it!"
+                }).then(function(result) {
+                    if (result.isConfirmed) {
+                        window.location.href = url;
+                    }
+                });
+                return false;
+            }
+            return confirm(text || "Are you sure you want to delete this?");
+        }
+        </script>';
     }
 }
 
@@ -688,6 +724,11 @@ if (!function_exists('csm_render_custom_customers_page')) {
         $currPrefix = ($defaultCurrency && !empty($defaultCurrency->prefix)) ? $defaultCurrency->prefix : '৳ ';
         $currSuffix = ($defaultCurrency && !empty($defaultCurrency->suffix)) ? $defaultCurrency->suffix : '';
 
+        $existingClients = [];
+        try {
+            $existingClients = Capsule::table('tblclients')->select('id', 'firstname', 'lastname', 'companyname', 'email', 'phonenumber')->orderBy('firstname', 'ASC')->get();
+        } catch (\Exception $e) {}
+
         $totalCustom = $customers->count();
         $totalDue = $customers->where('status', 'Unpaid')->sum('amount');
         $activeCount = $customers->where('status', 'Active')->count();
@@ -744,6 +785,11 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 $waPhone = preg_replace('/[^0-9]/', '', $c->phone ?: '');
                 $waBtn = !empty($waPhone) ? '<a href="https://wa.me/' . $waPhone . '" target="_blank" class="btn btn-success btn-xs" style="margin-left:4px;" title="WhatsApp"><i class="fab fa-whatsapp"></i></a>' : '';
 
+                $clientBadge = '';
+                if (!empty($c->userid)) {
+                    $clientBadge = ' <a href="clientssummary.php?userid=' . (int)$c->userid . '" target="_blank" class="btn btn-default btn-xs" style="margin-left:4px;padding:1px 6px;font-size:11px;" title="View WHMCS Client Profile"><i class="fas fa-user-check text-primary"></i> Client #' . (int)$c->userid . '</a>';
+                }
+
                 // Get latest note
                 $latestNote = Capsule::table('mod_csm_service_notes')
                     ->where('rel_type', 'custom_customer')
@@ -755,9 +801,9 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
                 $html .= '<tr>
                     <td>
-                        <strong>' . csm_h($c->customer_name) . '</strong>
+                        <strong>' . csm_h($c->customer_name) . '</strong>' . $clientBadge . '
                         ' . ($c->company_name ? '<br><small class="text-muted">' . csm_h($c->company_name) . '</small>' : '') . '
-                        <br><small><i class="fas fa-phone"></i> ' . csm_h($c->phone ?: 'N/A') . '</small> ' . $waBtn . '
+                        <br><small><i class="fas fa-phone"></i> ' . csm_h(str_replace('.', ' ', $c->phone ?: 'N/A')) . '</small> ' . $waBtn . '
                     </td>
                     <td>
                         <strong>' . csm_h($c->service_name) . '</strong>
@@ -770,7 +816,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     <td>' . $notePreview . ' <button class="btn btn-default btn-xs" onclick="openNoteModal(\'custom_customer\', ' . $c->id . ', \'' . csm_h(addslashes($c->customer_name)) . '\', ' . (float)$c->amount . ')" title="Add / View Note"><i class="fas fa-edit"></i></button></td>
                     <td>
                         <button class="btn btn-default btn-xs" onclick=\'editCustomer(' . json_encode($c) . ')\' title="Edit"><i class="fas fa-pen"></i></button>
-                        <a href="' . csm_h($moduleLink) . '&action=delete_custom_customer&id=' . $c->id . '" class="btn btn-danger btn-xs" onclick="return confirm(\'Delete this customer record?\')" title="Delete"><i class="fas fa-trash"></i></a>
+                        <a href="' . csm_h($moduleLink) . '&action=delete_custom_customer&id=' . $c->id . '" class="btn btn-danger btn-xs" onclick="return csmConfirmDelete(this.href, \'Delete this customer record and associated notes?\')" title="Delete"><i class="fas fa-trash"></i></a>
                     </td>
                 </tr>';
             }
@@ -779,17 +825,39 @@ if (!function_exists('csm_render_custom_customers_page')) {
         $html .= '</tbody></table></div></div>';
 
         // Add / Edit Modal
+        $clientOptionsHtml = '<option value="">-- Or enter custom / offline client manually below --</option>';
+        if (!empty($existingClients)) {
+            foreach ($existingClients as $cl) {
+                $clientOptionsHtml .= '<option value="' . $cl->id . '"'
+                    . ' data-name="' . csm_h(trim($cl->firstname . ' ' . $cl->lastname)) . '"'
+                    . ' data-company="' . csm_h($cl->companyname ?: '') . '"'
+                    . ' data-email="' . csm_h($cl->email) . '"'
+                    . ' data-phone="' . csm_h(str_replace('.', ' ', $cl->phonenumber ?: '')) . '">'
+                    . '#' . $cl->id . ' - ' . csm_h(trim($cl->firstname . ' ' . $cl->lastname) . ($cl->companyname ? ' (' . $cl->companyname . ')' : '') . ' - ' . $cl->email)
+                    . '</option>';
+            }
+        }
+
         $html .= '
         <div id="csmCustomerModal" class="modal fade" tabindex="-1" role="dialog" style="display:none;">
             <div class="modal-dialog modal-md" role="document">
                 <div class="modal-content" style="border-radius:8px;">
                     <form method="post" action="' . csm_h($moduleLink) . '&action=save_custom_customer">
                         <input type="hidden" name="customer_id" id="modalCustomerId" value="0">
+                        <input type="hidden" name="userid" id="csmCustUserId" value="0">
                         <div class="modal-header" style="background:#12589b;color:#fff;border-radius:7px 7px 0 0;">
                             <button type="button" class="close" data-dismiss="modal" style="color:#fff;opacity:0.9;">&times;</button>
                             <h4 class="modal-title" id="modalCustomerTitle"><i class="fas fa-user-plus"></i> Add Custom Customer</h4>
                         </div>
                         <div class="modal-body" style="padding:20px;">
+                            <div class="form-group" style="background:#f1f5f9;padding:12px;border-radius:6px;border:1px solid #cbd5e1;margin-bottom:16px;">
+                                <label style="color:#0f5ea8;font-weight:700;"><i class="fas fa-user-check"></i> Select Existing WHMCS Client (Optional):</label>
+                                <select id="csmSelectExistingClient" class="form-control" onchange="csmOnSelectExistingClient(this)">
+                                    ' . $clientOptionsHtml . '
+                                </select>
+                                <small class="text-muted" style="display:block;margin-top:4px;">Selecting an existing client will auto-fill Name, Company, Phone, and Email.</small>
+                            </div>
+
                             <div class="row">
                                 <div class="col-md-6 form-group">
                                     <label>Customer Name <span class="text-danger">*</span></label>
@@ -866,8 +934,23 @@ if (!function_exists('csm_render_custom_customers_page')) {
         </div>
 
         <script>
+        function csmOnSelectExistingClient(el) {
+            var opt = el.options[el.selectedIndex];
+            if (opt && opt.value) {
+                document.getElementById("csmCustUserId").value = opt.value;
+                document.getElementById("csmCustName").value = opt.getAttribute("data-name") || "";
+                document.getElementById("csmCustCompany").value = opt.getAttribute("data-company") || "";
+                document.getElementById("csmCustPhone").value = opt.getAttribute("data-phone") || "";
+                document.getElementById("csmCustEmail").value = opt.getAttribute("data-email") || "";
+            } else {
+                document.getElementById("csmCustUserId").value = "0";
+            }
+        }
+
         function openAddCustomerModal() {
             document.getElementById("modalCustomerId").value = "0";
+            document.getElementById("csmCustUserId").value = "0";
+            document.getElementById("csmSelectExistingClient").value = "";
             document.getElementById("modalCustomerTitle").innerHTML = "<i class=\'fas fa-user-plus\'></i> Add Custom Customer";
             document.getElementById("csmCustName").value = "";
             document.getElementById("csmCustCompany").value = "";
@@ -885,6 +968,8 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
         function editCustomer(item) {
             document.getElementById("modalCustomerId").value = item.id;
+            document.getElementById("csmCustUserId").value = item.userid || "0";
+            document.getElementById("csmSelectExistingClient").value = item.userid ? String(item.userid) : "";
             document.getElementById("modalCustomerTitle").innerHTML = "<i class=\'fas fa-edit\'></i> Edit Custom Customer";
             document.getElementById("csmCustName").value = item.customer_name || "";
             document.getElementById("csmCustCompany").value = item.company_name || "";
@@ -1015,7 +1100,7 @@ if (!function_exists('csm_render_suspension_manager_page')) {
                     <td><span style="font-size:12px;">' . csm_h($ov->reason ?: 'Extension granted') . '</span></td>
                     <td><span class="csm-badge csm-badge-' . ($ov->status === 'active' ? 'active' : 'suspended') . '">' . csm_h(ucfirst($ov->status)) . '</span></td>
                     <td>
-                        <a href="' . csm_h($moduleLink) . '&action=delete_grace_suspend&id=' . $ov->id . '" class="btn btn-danger btn-xs" onclick="return confirm(\'Remove custom grace override and resume standard WHMCS automation?\')"><i class="fas fa-trash"></i> Remove</a>
+                        <a href="' . csm_h($moduleLink) . '&action=delete_grace_suspend&id=' . $ov->id . '" class="btn btn-danger btn-xs" onclick="return csmConfirmDelete(this.href, \'Remove custom grace override and resume standard WHMCS automation?\')"><i class="fas fa-trash"></i> Remove</a>
                     </td>
                 </tr>';
             }
@@ -1077,7 +1162,7 @@ if (!function_exists('csm_render_due_notes_page')) {
     function csm_render_due_notes_page($vars)
     {
         $moduleLink = $vars['modulelink'];
-        $notes = Capsule::table('mod_csm_service_notes')->orderBy('id', 'DESC')->take(100)->get();
+        $notes = Capsule::table('mod_csm_service_notes')->orderBy('id', 'DESC')->take(200)->get();
 
         $defaultCurrency = null;
         try {
@@ -1086,7 +1171,15 @@ if (!function_exists('csm_render_due_notes_page')) {
         $currPrefix = ($defaultCurrency && !empty($defaultCurrency->prefix)) ? $defaultCurrency->prefix : '৳ ';
         $currSuffix = ($defaultCurrency && !empty($defaultCurrency->suffix)) ? $defaultCurrency->suffix : '';
 
-        $html = '<div class="csm-table-card">
+        $html = '';
+        if (isset($_GET['saved'])) {
+            $html .= '<div class="alert alert-success"><i class="fas fa-check-circle"></i> Due Note updated successfully.</div>';
+        }
+        if (isset($_GET['deleted'])) {
+            $html .= '<div class="alert alert-info"><i class="fas fa-info-circle"></i> Due Note deleted.</div>';
+        }
+
+        $html .= '<div class="csm-table-card">
             <div class="csm-table-header">
                 <div>
                     <h3><i class="fas fa-book-bookmark text-primary"></i> Service Due Notes &amp; Payment Ledger</h3>
@@ -1105,31 +1198,94 @@ if (!function_exists('csm_render_due_notes_page')) {
                             <th>Due Amount</th>
                             <th>Promised Date</th>
                             <th>Admin</th>
+                            <th width="90" class="text-center">Actions</th>
                         </tr>
                     </thead>
                     <tbody>';
 
         if ($notes->isEmpty()) {
-            $html .= '<tr><td colspan="8" style="text-align:center;padding:40px;color:#64748b;">
+            $html .= '<tr><td colspan="9" style="text-align:center;padding:40px;color:#64748b;">
                 <i class="fas fa-note-sticky" style="font-size:32px;margin-bottom:10px;display:block;opacity:0.5;"></i>
                 No due notes found. Notes added from Live Monitor or Custom Customers will appear here.
             </td></tr>';
         } else {
             foreach ($notes as $n) {
+                $targetLink = '#' . $n->rel_id;
+                if ($n->rel_type === 'service') {
+                    $targetLink = '<a href="clientsservices.php?id=' . $n->rel_id . '" target="_blank" style="font-weight:700;color:#0f5ea8;">#' . $n->rel_id . '</a>';
+                } elseif ($n->rel_type === 'domain') {
+                    $targetLink = '<a href="clientsdomains.php?id=' . $n->rel_id . '" target="_blank" style="font-weight:700;color:#0f5ea8;">#' . $n->rel_id . '</a>';
+                }
+
                 $html .= '<tr>
                     <td>' . date('d/m/Y H:i', strtotime($n->created_at)) . '</td>
                     <td><span class="label label-info">' . csm_h(strtoupper($n->rel_type)) . '</span></td>
-                    <td>#' . $n->rel_id . '</td>
+                    <td>' . $targetLink . '</td>
                     <td><strong>' . csm_h($n->note) . '</strong></td>
                     <td>' . ($n->paid_amount !== null ? '<span style="color:#16a34a;font-weight:700;">+' . $currPrefix . number_format((float)$n->paid_amount, 2) . $currSuffix . '</span>' : '—') . '</td>
                     <td>' . ($n->due_amount !== null ? '<span style="color:#dc2626;font-weight:700;">' . $currPrefix . number_format((float)$n->due_amount, 2) . $currSuffix . '</span>' : '—') . '</td>
                     <td>' . ($n->promised_date ? date('d/m/Y', strtotime($n->promised_date)) : '—') . '</td>
                     <td>' . csm_h($n->admin_name ?: 'Admin') . '</td>
+                    <td class="text-center">
+                        <button class="btn btn-default btn-xs" onclick=\'openEditNotePageModal(' . json_encode($n) . ')\' title="Edit Note"><i class="fas fa-pen"></i></button>
+                        <a href="' . csm_h($moduleLink) . '&action=delete_note&id=' . $n->id . '" class="btn btn-danger btn-xs" onclick="return csmConfirmDelete(this.href, \'Delete this note entry permanently?\')" title="Delete Note"><i class="fas fa-trash"></i></a>
+                    </td>
                 </tr>';
             }
         }
 
         $html .= '</tbody></table></div></div>';
+
+        // Edit Note Modal
+        $html .= '
+        <div id="csmEditNotePageModal" class="modal fade" tabindex="-1" role="dialog" style="display:none;">
+            <div class="modal-dialog modal-md" role="document">
+                <div class="modal-content" style="border-radius:8px;">
+                    <form method="post" action="' . csm_h($moduleLink) . '&action=save_edited_note">
+                        <input type="hidden" name="note_id" id="editNotePageId" value="0">
+                        <div class="modal-header" style="background:#12589b;color:#fff;border-radius:7px 7px 0 0;">
+                            <button type="button" class="close" data-dismiss="modal" style="color:#fff;">&times;</button>
+                            <h4 class="modal-title"><i class="fas fa-edit"></i> Edit Due Note / Ledger Entry</h4>
+                        </div>
+                        <div class="modal-body" style="padding:20px;">
+                            <div class="form-group">
+                                <label>Note / Payment Remark <span class="text-danger">*</span></label>
+                                <textarea name="note" id="editNotePageText" class="form-control" rows="3" required></textarea>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-4 form-group">
+                                    <label>Paid Amount</label>
+                                    <input type="number" step="0.01" name="paid_amount" id="editNotePagePaid" class="form-control">
+                                </div>
+                                <div class="col-md-4 form-group">
+                                    <label>Due Amount</label>
+                                    <input type="number" step="0.01" name="due_amount" id="editNotePageDue" class="form-control">
+                                </div>
+                                <div class="col-md-4 form-group">
+                                    <label>Promised Date</label>
+                                    <input type="date" name="promised_date" id="editNotePagePromised" class="form-control">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer" style="background:#f8fafc;">
+                            <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+                            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Changes</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        function openEditNotePageModal(noteObj) {
+            document.getElementById("editNotePageId").value = noteObj.id;
+            document.getElementById("editNotePageText").value = noteObj.note || "";
+            document.getElementById("editNotePagePaid").value = noteObj.paid_amount || "";
+            document.getElementById("editNotePageDue").value = noteObj.due_amount || "";
+            document.getElementById("editNotePagePromised").value = noteObj.promised_date || "";
+            $("#csmEditNotePageModal").modal("show");
+        }
+        </script>';
 
         return $html;
     }
@@ -1309,10 +1465,54 @@ if (!function_exists('client_services_monitor_output')) {
                     'admin_id' => $adminId,
                     'admin_name' => $adminName,
                     'created_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s'),
                 ]);
                 echo json_encode(['success' => true]);
             } else {
                 echo json_encode(['success' => false, 'error' => 'Missing note or ID']);
+            }
+            exit;
+        }
+
+        // AJAX Edit Note Handler
+        if (isset($_GET['ajax']) && $_GET['ajax'] === 'edit_note' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+            header('Content-Type: application/json');
+            $noteId = (int)($_POST['note_id'] ?? 0);
+            $note = trim($_POST['note'] ?? '');
+            $paid = isset($_POST['paid_amount']) && is_numeric($_POST['paid_amount']) ? (float)$_POST['paid_amount'] : null;
+            $due  = isset($_POST['due_amount']) && is_numeric($_POST['due_amount']) ? (float)$_POST['due_amount'] : null;
+            $promised = !empty($_POST['promised_date']) ? trim($_POST['promised_date']) : null;
+
+            if ($noteId > 0 && !empty($note)) {
+                Capsule::table('mod_csm_service_notes')->where('id', $noteId)->update([
+                    'note' => $note,
+                    'paid_amount' => $paid,
+                    'due_amount' => $due,
+                    'promised_date' => $promised,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+                echo json_encode(['success' => true]);
+            } else {
+                echo json_encode(['success' => false, 'error' => 'Invalid note text or ID']);
+            }
+            exit;
+        }
+
+        // AJAX Delete Note Handler
+        if (isset($_GET['ajax']) && $_GET['ajax'] === 'delete_note') {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+            header('Content-Type: application/json');
+            $noteId = (int)($_POST['note_id'] ?? ($_GET['note_id'] ?? 0));
+            if ($noteId > 0) {
+                Capsule::table('mod_csm_service_notes')->where('id', $noteId)->delete();
+                echo json_encode(['success' => true]);
+            } else {
+                echo json_encode(['success' => false, 'error' => 'Invalid note ID']);
             }
             exit;
         }
@@ -1355,6 +1555,7 @@ if (!function_exists('client_services_monitor_output')) {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             if ($action === 'save_custom_customer') {
                 $cId = (int)($_POST['customer_id'] ?? 0);
+                $userId = (int)($_POST['userid'] ?? 0);
                 $name = trim($_POST['customer_name'] ?? '');
                 $company = trim($_POST['company_name'] ?? '');
                 $phone = trim($_POST['phone'] ?? '');
@@ -1370,6 +1571,7 @@ if (!function_exists('client_services_monitor_output')) {
 
                 if ($cId > 0) {
                     Capsule::table('mod_csm_custom_customers')->where('id', $cId)->update([
+                        'userid'        => $userId > 0 ? $userId : null,
                         'customer_name' => $name,
                         'company_name'  => $company,
                         'phone'         => $phone,
@@ -1385,6 +1587,7 @@ if (!function_exists('client_services_monitor_output')) {
                     ]);
                 } else {
                     $newCustId = Capsule::table('mod_csm_custom_customers')->insertGetId([
+                        'userid'        => $userId > 0 ? $userId : null,
                         'customer_name' => $name,
                         'company_name'  => $company,
                         'phone'         => $phone,
@@ -1407,11 +1610,33 @@ if (!function_exists('client_services_monitor_output')) {
                             'note' => $notes,
                             'due_amount' => $amount,
                             'created_at' => $now,
+                            'updated_at' => $now,
                         ]);
                     }
                 }
 
                 header('Location: ' . $vars['modulelink'] . '&action=custom_customers&saved=1');
+                exit;
+            }
+
+            if ($action === 'save_edited_note') {
+                $noteId = (int)($_POST['note_id'] ?? 0);
+                $note = trim($_POST['note'] ?? '');
+                $paid = isset($_POST['paid_amount']) && is_numeric($_POST['paid_amount']) ? (float)$_POST['paid_amount'] : null;
+                $due  = isset($_POST['due_amount']) && is_numeric($_POST['due_amount']) ? (float)$_POST['due_amount'] : null;
+                $promised = !empty($_POST['promised_date']) ? trim($_POST['promised_date']) : null;
+
+                if ($noteId > 0 && !empty($note)) {
+                    Capsule::table('mod_csm_service_notes')->where('id', $noteId)->update([
+                        'note' => $note,
+                        'paid_amount' => $paid,
+                        'due_amount' => $due,
+                        'promised_date' => $promised,
+                        'updated_at' => date('Y-m-d H:i:s'),
+                    ]);
+                }
+
+                header('Location: ' . $vars['modulelink'] . '&action=due_notes&saved=1');
                 exit;
             }
 
@@ -1472,6 +1697,15 @@ if (!function_exists('client_services_monitor_output')) {
                 Capsule::table('mod_csm_service_notes')->where('rel_type', 'custom_customer')->where('rel_id', $delId)->delete();
             }
             header('Location: ' . $vars['modulelink'] . '&action=custom_customers&deleted=1');
+            exit;
+        }
+
+        if ($action === 'delete_note') {
+            $delId = (int)($_GET['id'] ?? 0);
+            if ($delId > 0) {
+                Capsule::table('mod_csm_service_notes')->where('id', $delId)->delete();
+            }
+            header('Location: ' . $vars['modulelink'] . '&action=due_notes&deleted=1');
             exit;
         }
 
@@ -1766,9 +2000,12 @@ if (!function_exists('client_services_monitor_fetch_data')) {
                 }
             }
 
-            // WhatsApp link generator
-            $rawPhone = trim($row->phonenumber);
+            // Phone and WhatsApp link generator
+            $rawPhone = trim($row->phonenumber ?? '');
             $cleanPhone = preg_replace('/[^0-9+]/', '', str_replace('.', '', $rawPhone));
+            $cleanDisplayPhone = str_replace('.', ' ', $rawPhone);
+            $cleanDisplayPhone = trim(preg_replace('/\s+/', ' ', $cleanDisplayPhone));
+
             $intlPhone = '';
             if (!empty($cleanPhone)) {
                 $digitsOnly = preg_replace('/[^0-9]/', '', $cleanPhone);
@@ -1780,6 +2017,8 @@ if (!function_exists('client_services_monitor_fetch_data')) {
                     $intlPhone = $defaultCountryCode . $digitsOnly;
                 }
             }
+
+            $dialPhone = !empty($intlPhone) ? '+' . ltrim($intlPhone, '+') : (!empty($cleanPhone) ? (substr($cleanPhone, 0, 1) === '+' ? $cleanPhone : '+' . $cleanPhone) : '');
 
             $waTemplate = csm_get_setting('wa_template', '');
             $waMessage = str_replace(
@@ -1800,7 +2039,8 @@ if (!function_exists('client_services_monitor_fetch_data')) {
                 'client_name'    => trim($row->firstname . ' ' . $row->lastname),
                 'company'        => $row->companyname ?: '',
                 'email'          => $row->email,
-                'phone'          => $row->phonenumber ?: 'N/A',
+                'phone'          => !empty($cleanDisplayPhone) ? $cleanDisplayPhone : 'N/A',
+                'dial_phone'     => $dialPhone,
                 'intl_phone'     => $intlPhone,
                 'wa_url'         => $waUrl,
                 'product_name'   => $row->product_name,

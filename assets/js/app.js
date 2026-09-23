@@ -1,10 +1,12 @@
 /**
  * WHMCS Client Services & Expiry Monitor - JavaScript Controller
- * Version: 2.0.0
+ * Version: 2.1.0
  */
 
 (function ($) {
     'use strict';
+
+    var csmCurrentRecords = [];
 
     var csmState = {
         page: 1,
@@ -19,6 +21,57 @@
         search: '',
         autoRefreshTimer: null,
         searchDebounceTimer: null
+    };
+
+    // Global SweetAlert2 notification helpers
+    window.csmToast = function (icon, title) {
+        if (typeof Swal !== 'undefined') {
+            const Toast = Swal.mixin({
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timer: 3000,
+                timerProgressBar: true
+            });
+            Toast.fire({ icon: icon || 'success', title: title });
+        } else {
+            alert(title);
+        }
+    };
+
+    window.csmAlert = function (icon, title, text) {
+        if (typeof Swal !== 'undefined') {
+            Swal.fire({
+                icon: icon || 'info',
+                title: title || 'Notice',
+                text: text || '',
+                confirmButtonColor: '#12589b'
+            });
+        } else {
+            alert((title ? title + ': ' : '') + (text || ''));
+        }
+    };
+
+    window.csmConfirmAction = function (title, text, confirmBtnText, onConfirm) {
+        if (typeof Swal !== 'undefined') {
+            Swal.fire({
+                title: title || 'Are you sure?',
+                text: text || "You won't be able to revert this!",
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#d33',
+                cancelButtonColor: '#64748b',
+                confirmButtonText: confirmBtnText || 'Yes, proceed'
+            }).then(function (result) {
+                if (result.isConfirmed && typeof onConfirm === 'function') {
+                    onConfirm();
+                }
+            });
+        } else {
+            if (confirm(text || 'Are you sure you want to proceed?')) {
+                if (typeof onConfirm === 'function') onConfirm();
+            }
+        }
     };
 
     $(document).ready(function () {
@@ -126,6 +179,7 @@
             if (!phone || phone === 'N/A') return;
 
             navigator.clipboard.writeText(phone);
+            csmToast('success', 'Phone number copied: ' + phone);
             var $btn = $(this);
             var orig = $btn.html();
             $btn.html('<i class="fa-solid fa-check text-success"></i>');
@@ -173,6 +227,7 @@
             dataType: 'json',
             success: function (response) {
                 if (response && response.success) {
+                    csmCurrentRecords = response.records || [];
                     renderTable(response.records);
                     renderPagination(response);
                     updateCounters(response.stats);
@@ -216,12 +271,15 @@
                 dueBadge = '<small class="text-muted">' + item.days_left + 'd left</small>';
             }
 
-            // WhatsApp / Phone
+            // Direct Call + WhatsApp + Copy Phone Column
             var phoneHtml = '<span class="text-muted">N/A</span>';
             if (item.phone && item.phone !== 'N/A') {
+                var dialNum = item.dial_phone || item.phone.replace(/[^0-9+]/g, '');
+                var callBtn = dialNum ? '<a href="tel:' + escapeHtml(dialNum) + '" class="btn btn-primary btn-xs" title="Direct Call ' + escapeHtml(dialNum) + '" style="background:#0284c7;border-color:#0284c7;color:#fff;"><i class="fas fa-phone"></i></a>' : '';
                 var waBtn = item.wa_url ? '<button class="btn btn-success btn-xs csm-btn-wa-modal" data-name="' + escapeHtml(item.client_name) + '" data-phone="' + escapeHtml(item.phone) + '" data-waurl="' + escapeHtml(item.wa_url) + '" title="WhatsApp Reminder"><i class="fab fa-whatsapp"></i></button>' : '';
                 var copyBtn = '<button class="btn btn-default btn-xs csm-btn-copy" data-phone="' + escapeHtml(item.phone) + '" title="Copy"><i class="far fa-copy"></i></button>';
-                phoneHtml = '<div style="font-size:12px;font-weight:600;">' + escapeHtml(item.phone) + '</div><div style="margin-top:2px;display:flex;gap:4px;">' + waBtn + copyBtn + '</div>';
+                
+                phoneHtml = '<div style="font-size:12px;font-weight:700;color:#1e293b;">' + escapeHtml(item.phone) + '</div><div style="margin-top:3px;display:flex;gap:4px;">' + callBtn + waBtn + copyBtn + '</div>';
             }
 
             // Grace Suspend Column
@@ -258,8 +316,9 @@
                 '<td>' + graceHtml + '</td>' +
                 '<td>' + noteHtml + '</td>' +
                 '<td><span class="csm-badge csm-badge-' + statusClass + '">' + escapeHtml(item.status) + '</span></td>' +
-                '<td class="text-center">' +
-                '<a href="clientsservices.php?id=' + item.id + '" target="_blank" class="btn btn-default btn-xs" title="View Service"><i class="fas fa-external-link-alt"></i></a> ' +
+                '<td class="text-center" style="white-space:nowrap;">' +
+                '<button type="button" class="btn btn-info btn-xs" onclick="csmQuickView(' + idx + ')" title="Quick View Specs & Details"><i class="fas fa-eye"></i></button> ' +
+                '<a href="clientsservices.php?id=' + item.id + '" target="_blank" class="btn btn-default btn-xs" title="View Service in WHMCS"><i class="fas fa-external-link-alt"></i></a> ' +
                 '<a href="dologin.php?userid=' + item.userid + '" target="_blank" class="btn btn-default btn-xs" title="Login as Client"><i class="fas fa-right-to-bracket"></i></a>' +
                 '</td>' +
                 '</tr>';
@@ -267,6 +326,104 @@
 
         $tbody.html(rowsHtml);
     }
+
+    // Quick View Modal
+    window.csmQuickView = function (idx) {
+        var item = csmCurrentRecords[idx];
+        if (!item) return;
+
+        $('#qvTitle').text(item.product_name + ' (#' + item.id + ')');
+        $('#qvClientName').text(item.client_name);
+        $('#qvCompany').text(item.company || 'Individual / None');
+        $('#qvEmailLink').attr('href', 'mailto:' + item.email).text(item.email);
+        
+        var phoneClean = item.phone || 'N/A';
+        $('#qvPhoneText').text(phoneClean);
+        
+        var phoneBtnsHtml = '';
+        if (item.phone && item.phone !== 'N/A') {
+            var dialNum = item.dial_phone || item.phone.replace(/[^0-9+]/g, '');
+            if (dialNum) {
+                phoneBtnsHtml += '<a href="tel:' + escapeHtml(dialNum) + '" class="btn btn-primary btn-xs" title="Call"><i class="fas fa-phone"></i> Call</a> ';
+            }
+            if (item.wa_url) {
+                phoneBtnsHtml += '<a href="' + escapeHtml(item.wa_url) + '" target="_blank" class="btn btn-success btn-xs" title="WhatsApp"><i class="fab fa-whatsapp"></i> WhatsApp</a> ';
+            }
+            phoneBtnsHtml += '<button class="btn btn-default btn-xs csm-btn-copy" data-phone="' + escapeHtml(item.phone) + '" title="Copy"><i class="far fa-copy"></i></button>';
+        }
+        $('#qvPhoneButtons').html(phoneBtnsHtml);
+
+        $('#qvPrice').text(item.formatted_price || '৳ 0.00');
+        $('#qvBillingCycle').text(item.billing_cycle || '-');
+        $('#qvNextDueDate').text(item.next_due_date || 'N/A');
+
+        var dueBadge = '';
+        if (item.expiry_status === 'overdue') {
+            dueBadge = '<span class="csm-badge csm-badge-overdue">' + Math.abs(item.days_left) + 'd Overdue</span>';
+        } else if (item.expiry_status === 'today') {
+            dueBadge = '<span class="csm-badge csm-badge-warning">Due Today</span>';
+        } else if (item.expiry_status === 'warning') {
+            dueBadge = '<span class="csm-badge csm-badge-warning">' + item.days_left + 'd Left</span>';
+        }
+        $('#qvDueBadge').html(dueBadge);
+
+        if (item.grace_date) {
+            $('#qvGraceSuspend').html('<span class="label label-primary"><i class="fas fa-clock"></i> ' + escapeHtml(item.grace_date) + '</span> <small class="text-muted">(' + escapeHtml(item.grace_reason || 'Extension') + ')</small>');
+        } else {
+            $('#qvGraceSuspend').html('<span class="text-muted">None (Standard WHMCS)</span>');
+        }
+
+        $('#qvServiceId').text('#' + item.id);
+        $('#qvProductName').text(item.product_name);
+        if (item.domain) {
+            $('#qvDomainLink').attr('href', 'http://' + item.domain).text(item.domain).show();
+        } else {
+            $('#qvDomainLink').text('N/A').attr('href', '#');
+        }
+        $('#qvServerName').text(item.server_name || 'Standard / None');
+
+        var statusClass = item.status === 'Active' ? 'active' : (item.status === 'Suspended' ? 'suspended' : 'warning');
+        $('#qvStatusBadge').html('<span class="csm-badge csm-badge-' + statusClass + '">' + escapeHtml(item.status) + '</span>');
+
+        $('#qvBtnClientSummary').attr('href', 'clientssummary.php?userid=' + item.userid);
+        $('#qvBtnLoginClient').attr('href', 'dologin.php?userid=' + item.userid);
+        $('#qvBtnManageService').attr('href', 'clientsservices.php?id=' + item.id);
+
+        $('#qvBtnAddNote').off('click').on('click', function () {
+            $('#csmQuickViewModal').modal('hide');
+            openNoteModal('service', item.id, item.product_name + ' (#' + item.id + ')', item.price);
+        });
+
+        // Load Note history in Quick View
+        $('#qvNotesList').html('<p class="text-muted"><i class="fas fa-spinner fa-spin"></i> Loading notes...</p>');
+        $.ajax({
+            url: CSM_GET_NOTES_URL + '&rel_type=service&rel_id=' + item.id,
+            type: 'GET',
+            dataType: 'json',
+            success: function (res) {
+                if (res && res.success && res.notes && res.notes.length > 0) {
+                    var nHtml = '';
+                    res.notes.forEach(function (n) {
+                        nHtml += '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:6px 8px;margin-bottom:5px;">' +
+                            '<div style="font-weight:700;color:#1e293b;">' + escapeHtml(n.note) + '</div>' +
+                            '<div style="font-size:10px;color:#64748b;margin-top:2px;">' +
+                            (n.paid_amount ? '<span style="color:#16a34a;font-weight:700;">Paid: ' + n.paid_amount + '</span> &bull; ' : '') +
+                            (n.due_amount ? '<span style="color:#dc2626;font-weight:700;">Due: ' + n.due_amount + '</span> &bull; ' : '') +
+                            '<span>' + n.created_at + '</span>' +
+                            '</div></div>';
+                    });
+                    $('#qvNotesList').html(nHtml);
+                } else {
+                    $('#qvNotesList').html('<p class="text-muted" style="margin:0;">No notes recorded yet.</p>');
+                }
+            },
+            error: function () {
+                $('#qvNotesList').html('<p class="text-muted" style="margin:0;">No notes available.</p>');
+            }
+        });
+
+        $('#csmQuickViewModal').modal('show');
+    };
 
     function renderPagination(data) {
         var total = data.total || 0;
@@ -329,7 +486,10 @@
     }
 
     // Modal: Note Management
+    var currentEditingNoteId = 0;
+
     window.openNoteModal = function (relType, relId, targetName, dueAmount) {
+        currentEditingNoteId = 0;
         $('#modalNoteRelType').val(relType);
         $('#modalNoteRelId').val(relId);
         $('#modalNoteTarget').val(targetName);
@@ -337,9 +497,14 @@
         $('#modalNotePaid').val('');
         $('#modalNoteDue').val(dueAmount || '');
         $('#modalNotePromised').val('');
-        $('#modalNotesHistoryList').html('<p class="text-muted">Loading history...</p>');
+        $('#btnSaveNoteAjax').html('<i class="fas fa-plus"></i> Save Note / Record Entry');
+        $('#modalNotesHistoryList').html('<p class="text-muted"><i class="fas fa-spinner fa-spin"></i> Loading history...</p>');
 
-        // Fetch previous notes history
+        loadNotesHistory(relType, relId);
+        $('#csmNoteModal').modal('show');
+    };
+
+    function loadNotesHistory(relType, relId) {
         $.ajax({
             url: CSM_GET_NOTES_URL + '&rel_type=' + encodeURIComponent(relType) + '&rel_id=' + encodeURIComponent(relId),
             type: 'GET',
@@ -348,23 +513,64 @@
                 if (res && res.success && res.notes && res.notes.length > 0) {
                     var histHtml = '';
                     res.notes.forEach(function (n) {
-                        histHtml += '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px;margin-bottom:6px;">' +
-                            '<div style="font-weight:700;color:#1e293b;">' + escapeHtml(n.note) + '</div>' +
-                            '<div style="font-size:11px;color:#64748b;margin-top:2px;">' +
-                            (n.paid_amount ? '<span style="color:#16a34a;">Paid: ' + n.paid_amount + '</span> &bull; ' : '') +
-                            (n.due_amount ? '<span style="color:#dc2626;">Due: ' + n.due_amount + '</span> &bull; ' : '') +
-                            (n.promised_date ? '<span>Promised: ' + n.promised_date + '</span> &bull; ' : '') +
+                        var nJson = escapeHtml(JSON.stringify(n));
+                        histHtml += '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;margin-bottom:8px;position:relative;">' +
+                            '<div style="display:flex;justify-content:space-between;align-items:flex-start;">' +
+                            '<div style="font-weight:700;color:#1e293b;flex-grow:1;padding-right:10px;">' + escapeHtml(n.note) + '</div>' +
+                            '<div style="white-space:nowrap;display:flex;gap:4px;">' +
+                            '<button type="button" class="btn btn-default btn-xs" onclick="csmInlineEditNote(' + n.id + ', ' + nJson + ')" title="Edit Note"><i class="fas fa-edit text-primary"></i></button>' +
+                            '<button type="button" class="btn btn-danger btn-xs" onclick="csmInlineDeleteNote(' + n.id + ')" title="Delete Note"><i class="fas fa-trash"></i></button>' +
+                            '</div>' +
+                            '</div>' +
+                            '<div style="font-size:11px;color:#64748b;margin-top:4px;">' +
+                            (n.paid_amount ? '<span style="color:#16a34a;font-weight:700;">Paid: ' + n.paid_amount + '</span> &bull; ' : '') +
+                            (n.due_amount ? '<span style="color:#dc2626;font-weight:700;">Due: ' + n.due_amount + '</span> &bull; ' : '') +
+                            (n.promised_date ? '<span style="color:#2563eb;font-weight:600;">Promised: ' + n.promised_date + '</span> &bull; ' : '') +
                             '<span>' + n.created_at + ' (' + escapeHtml(n.admin_name || 'Admin') + ')</span>' +
                             '</div></div>';
                     });
                     $('#modalNotesHistoryList').html(histHtml);
                 } else {
-                    $('#modalNotesHistoryList').html('<p class="text-muted">No previous notes recorded.</p>');
+                    $('#modalNotesHistoryList').html('<p class="text-muted" style="margin:0;">No previous notes recorded.</p>');
                 }
             }
         });
+    }
 
-        $('#csmNoteModal').modal('show');
+    window.csmInlineEditNote = function (noteId, noteObj) {
+        currentEditingNoteId = noteId;
+        $('#modalNoteText').val(noteObj.note || '');
+        $('#modalNotePaid').val(noteObj.paid_amount || '');
+        $('#modalNoteDue').val(noteObj.due_amount || '');
+        $('#modalNotePromised').val(noteObj.promised_date || '');
+        $('#btnSaveNoteAjax').html('<i class="fas fa-save"></i> Update Note Entry');
+        $('#modalNoteText').focus();
+        csmToast('info', 'Loaded note for editing. Click Update Note Entry when done.');
+    };
+
+    window.csmInlineDeleteNote = function (noteId) {
+        csmConfirmAction('Delete Note Entry?', 'Are you sure you want to delete this note permanently?', 'Yes, Delete', function () {
+            $.ajax({
+                url: CSM_DELETE_NOTE_URL,
+                type: 'POST',
+                data: { note_id: noteId },
+                dataType: 'json',
+                success: function (res) {
+                    if (res && res.success) {
+                        csmToast('success', 'Note deleted successfully');
+                        var relType = $('#modalNoteRelType').val();
+                        var relId = $('#modalNoteRelId').val();
+                        loadNotesHistory(relType, relId);
+                        csmLoadData();
+                    } else {
+                        csmAlert('error', 'Error', res.error || 'Failed to delete note.');
+                    }
+                },
+                error: function () {
+                    csmAlert('error', 'Network Error', 'Could not delete note due to a connection error.');
+                }
+            });
+        });
     };
 
     window.csmSaveNoteAjax = function () {
@@ -376,36 +582,48 @@
         var promised = $('#modalNotePromised').val();
 
         if (!note) {
-            alert('Please enter a note / remark text.');
+            csmAlert('warning', 'Note Required', 'Please enter a note / remark text before saving.');
             return;
+        }
+
+        var isEditing = currentEditingNoteId > 0;
+        var targetUrl = isEditing ? CSM_EDIT_NOTE_URL : CSM_NOTE_URL;
+        var postData = {
+            rel_type: relType,
+            rel_id: relId,
+            note: note,
+            paid_amount: paid,
+            due_amount: due,
+            promised_date: promised
+        };
+        if (isEditing) {
+            postData.note_id = currentEditingNoteId;
         }
 
         $('#btnSaveNoteAjax').prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Saving...');
 
         $.ajax({
-            url: CSM_NOTE_URL,
+            url: targetUrl,
             type: 'POST',
-            data: {
-                rel_type: relType,
-                rel_id: relId,
-                note: note,
-                paid_amount: paid,
-                due_amount: due,
-                promised_date: promised
-            },
+            data: postData,
             dataType: 'json',
             success: function (res) {
                 $('#btnSaveNoteAjax').prop('disabled', false).html('<i class="fas fa-plus"></i> Save Note / Record Entry');
                 if (res && res.success) {
-                    $('#csmNoteModal').modal('hide');
+                    csmToast('success', isEditing ? 'Note updated successfully' : 'Note added successfully');
+                    currentEditingNoteId = 0;
+                    $('#modalNoteText').val('');
+                    $('#modalNotePaid').val('');
+                    $('#modalNotePromised').val('');
+                    loadNotesHistory(relType, relId);
                     csmLoadData();
                 } else {
-                    alert('Error: ' + (res.error || 'Failed to save note.'));
+                    csmAlert('error', 'Save Failed', res.error || 'Failed to save note.');
                 }
             },
             error: function () {
                 $('#btnSaveNoteAjax').prop('disabled', false).html('<i class="fas fa-plus"></i> Save Note / Record Entry');
-                alert('Network error while saving note.');
+                csmAlert('error', 'Network Error', 'Could not save note due to a connection issue.');
             }
         });
     };
@@ -425,7 +643,7 @@
         var reason = $('#liveGraceReason').val().trim();
 
         if (!graceDate) {
-            alert('Please select a custom grace suspend date.');
+            csmAlert('warning', 'Date Required', 'Please select a custom grace suspend date.');
             return;
         }
 
@@ -439,10 +657,11 @@
             },
             success: function () {
                 $('#csmLiveGraceModal').modal('hide');
+                csmToast('success', 'Custom suspension deadline saved.');
                 csmLoadData();
             },
             error: function () {
-                alert('Error saving suspension grace deadline.');
+                csmAlert('error', 'Error', 'Error saving suspension grace deadline.');
             }
         });
     };

@@ -344,42 +344,145 @@ if (!defined("WHMCS")) {
     </div>
 </div>
 
-<!-- Modal: WhatsApp Contact Message -->
-<div class="modal fade" id="csmQuickContactModal" tabindex="-1" role="dialog">
-    <div class="modal-dialog" role="document">
-        <div class="modal-content" style="border-radius:8px;">
-            <div class="modal-header" style="background:#16a34a;color:#fff;border-radius:7px 7px 0 0;">
-                <button type="button" class="close" data-dismiss="modal" style="color:#fff;">&times;</button>
-                <h4 class="modal-title"><i class="fa-brands fa-whatsapp"></i> Send WhatsApp Message</h4>
+<!-- Modal: Quick View Service Specs & Details -->
+<div class="modal fade" id="csmQuickViewModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content" style="border-radius:10px;overflow:hidden;box-shadow:0 20px 40px rgba(0,0,0,0.2);">
+            <div class="modal-header" style="background:#12589b;color:#fff;padding:16px 22px;">
+                <button type="button" class="close" data-dismiss="modal" style="color:#fff;opacity:0.9;font-size:24px;">&times;</button>
+                <h4 class="modal-title" style="font-weight:700;display:flex;align-items:center;gap:10px;">
+                    <i class="fa-solid fa-circle-info"></i>
+                    <span id="qvTitle">Service Overview &amp; Specifications</span>
+                </h4>
             </div>
-            <div class="modal-body" style="padding:20px;">
-                <div class="form-group">
-                    <label>Recipient:</label>
-                    <input type="text" id="modalClientInfo" class="form-control" readonly>
-                </div>
-                <div class="form-group">
-                    <label>Phone Number:</label>
-                    <input type="text" id="modalPhoneNumber" class="form-control" readonly>
-                </div>
-                <div class="form-group">
-                    <label>Message Text:</label>
-                    <textarea id="modalMessageText" class="form-control" rows="4" placeholder="Type your WhatsApp message here..."></textarea>
+            <div class="modal-body" style="padding:22px;background:#f8fafc;">
+                <div class="row">
+                    <!-- Client Overview Column -->
+                    <div class="col-md-6">
+                        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin-bottom:15px;">
+                            <h5 style="font-weight:800;color:#0f5ea8;margin-top:0;margin-bottom:12px;border-bottom:1px solid #f1f5f9;padding-bottom:8px;">
+                                <i class="fa-solid fa-user"></i> Client Profile
+                            </h5>
+                            <table class="table table-condensed" style="margin-bottom:0;font-size:13px;">
+                                <tr>
+                                    <td width="110" style="color:#64748b;font-weight:600;border:0;">Client Name:</td>
+                                    <td style="font-weight:700;color:#1e293b;border:0;" id="qvClientName">-</td>
+                                </tr>
+                                <tr>
+                                    <td style="color:#64748b;font-weight:600;">Company:</td>
+                                    <td id="qvCompany">-</td>
+                                </tr>
+                                <tr>
+                                    <td style="color:#64748b;font-weight:600;">Email Address:</td>
+                                    <td><a id="qvEmailLink" href="mailto:" style="color:#2563eb;">-</a></td>
+                                </tr>
+                                <tr>
+                                    <td style="color:#64748b;font-weight:600;">Phone Number:</td>
+                                    <td>
+                                        <span id="qvPhoneText" style="font-weight:700;">-</span>
+                                        <div id="qvPhoneButtons" style="margin-top:4px;display:flex;gap:5px;"></div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </div>
+
+                        <!-- Billing & Expiry Card -->
+                        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:16px;">
+                            <h5 style="font-weight:800;color:#0f5ea8;margin-top:0;margin-bottom:12px;border-bottom:1px solid #f1f5f9;padding-bottom:8px;">
+                                <i class="fa-solid fa-credit-card"></i> Billing &amp; Due Status
+                            </h5>
+                            <table class="table table-condensed" style="margin-bottom:0;font-size:13px;">
+                                <tr>
+                                    <td width="110" style="color:#64748b;font-weight:600;border:0;">Recurring Price:</td>
+                                    <td style="font-weight:800;color:#1e293b;border:0;font-size:15px;" id="qvPrice">-</td>
+                                </tr>
+                                <tr>
+                                    <td style="color:#64748b;font-weight:600;">Billing Cycle:</td>
+                                    <td style="font-weight:600;" id="qvBillingCycle">-</td>
+                                </tr>
+                                <tr>
+                                    <td style="color:#64748b;font-weight:600;">Next Due Date:</td>
+                                    <td>
+                                        <span id="qvNextDueDate" style="font-weight:800;">-</span>
+                                        <span id="qvDueBadge" style="margin-left:6px;"></span>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="color:#64748b;font-weight:600;">Grace Deadline:</td>
+                                    <td id="qvGraceSuspend">-</td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Service Details Column -->
+                    <div class="col-md-6">
+                        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin-bottom:15px;">
+                            <h5 style="font-weight:800;color:#0f5ea8;margin-top:0;margin-bottom:12px;border-bottom:1px solid #f1f5f9;padding-bottom:8px;">
+                                <i class="fa-solid fa-server"></i> Service Specifications
+                            </h5>
+                            <table class="table table-condensed" style="margin-bottom:0;font-size:13px;">
+                                <tr>
+                                    <td width="110" style="color:#64748b;font-weight:600;border:0;">Service ID:</td>
+                                    <td style="font-weight:700;border:0;" id="qvServiceId">-</td>
+                                </tr>
+                                <tr>
+                                    <td style="color:#64748b;font-weight:600;">Product / Plan:</td>
+                                    <td style="font-weight:700;color:#1e293b;" id="qvProductName">-</td>
+                                </tr>
+                                <tr>
+                                    <td style="color:#64748b;font-weight:600;">Domain:</td>
+                                    <td><a id="qvDomainLink" href="#" target="_blank" style="font-weight:700;color:#1d4ed8;">-</a></td>
+                                </tr>
+                                <tr>
+                                    <td style="color:#64748b;font-weight:600;">Server Node:</td>
+                                    <td id="qvServerName">-</td>
+                                </tr>
+                                <tr>
+                                    <td style="color:#64748b;font-weight:600;">Status:</td>
+                                    <td id="qvStatusBadge">-</td>
+                                </tr>
+                            </table>
+                        </div>
+
+                        <!-- Due Notes History Snippet -->
+                        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:16px;">
+                            <h5 style="font-weight:800;color:#0f5ea8;margin-top:0;margin-bottom:12px;border-bottom:1px solid #f1f5f9;padding-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+                                <span><i class="fa-solid fa-book-bookmark"></i> Recent Notes &amp; Remarks</span>
+                                <button type="button" class="btn btn-primary btn-xs" id="qvBtnAddNote"><i class="fa-solid fa-plus"></i> Add Note</button>
+                            </h5>
+                            <div id="qvNotesList" style="max-height:140px;overflow-y:auto;font-size:12px;">
+                                <p class="text-muted">No notes recorded.</p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="modal-footer" style="background:#f8fafc;">
-                <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
-                <button type="button" class="btn btn-success" id="csmBtnSendWhatsApp">
-                    <i class="fa-brands fa-whatsapp"></i> Open in WhatsApp
-                </button>
+            <div class="modal-footer" style="background:#f1f5f9;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <a id="qvBtnClientSummary" href="#" target="_blank" class="btn btn-default btn-sm">
+                        <i class="fa-solid fa-user"></i> Client Profile
+                    </a>
+                    <a id="qvBtnLoginClient" href="#" target="_blank" class="btn btn-default btn-sm">
+                        <i class="fa-solid fa-right-to-bracket"></i> Login as Client
+                    </a>
+                    <a id="qvBtnManageService" href="#" target="_blank" class="btn btn-primary btn-sm">
+                        <i class="fa-solid fa-external-link-alt"></i> Manage Service in WHMCS
+                    </a>
+                </div>
+                <button type="button" class="btn btn-default btn-sm" data-dismiss="modal">Close</button>
             </div>
         </div>
     </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
     var CSM_MODULE_LINK = "<?php echo addslashes($modulelink ?? ($vars['modulelink'] ?? 'addonmodules.php?module=client_services_monitor')); ?>";
     var CSM_AJAX_URL = CSM_MODULE_LINK + "&ajax=1";
     var CSM_NOTE_URL = CSM_MODULE_LINK + "&ajax=save_note";
+    var CSM_EDIT_NOTE_URL = CSM_MODULE_LINK + "&ajax=edit_note";
+    var CSM_DELETE_NOTE_URL = CSM_MODULE_LINK + "&ajax=delete_note";
     var CSM_GET_NOTES_URL = CSM_MODULE_LINK + "&ajax=get_notes";
 </script>
 <script src="../modules/addons/client_services_monitor/assets/js/app.js?v=<?php echo time(); ?>"></script>
