@@ -214,6 +214,7 @@ if (!function_exists('csm_seed_settings')) {
             'highlight_days'              => '7',
             'default_country_code'        => '880',
             'auto_suspend_grace_enabled'  => 'on',
+            'display_currency_id'         => '0',
             'wa_template'                 => "Dear {client_name},\nThis is a gentle reminder that your service *{service_name}* ({domain}) is due for renewal on *{due_date}*. Amount Due: *{amount}*.\nPlease renew timely to avoid service disruption.\nThank you!",
             'custom_admin_folder'         => '',
         ];
@@ -223,6 +224,31 @@ if (!function_exists('csm_seed_settings')) {
             if ($current === null || $current === '') {
                 csm_save_setting($k, $v);
             }
+        }
+    }
+}
+
+// Helper: Get active / chosen currency
+if (!function_exists('csm_get_active_currency')) {
+    function csm_get_active_currency($clientCurrencyId = 0)
+    {
+        try {
+            $chosenCurrId = (int) csm_get_setting('display_currency_id', '0');
+            if ($chosenCurrId > 0) {
+                $curr = Capsule::table('tblcurrencies')->where('id', $chosenCurrId)->first();
+                if ($curr) {
+                    return $curr;
+                }
+            }
+            if ($clientCurrencyId > 0) {
+                $curr = Capsule::table('tblcurrencies')->where('id', $clientCurrencyId)->first();
+                if ($curr) {
+                    return $curr;
+                }
+            }
+            return Capsule::table('tblcurrencies')->where('default', 1)->first() ?: Capsule::table('tblcurrencies')->first();
+        } catch (\Exception $e) {
+            return null;
         }
     }
 }
@@ -595,7 +621,37 @@ if (!function_exists('csm_shared_css')) {
                 .csm-stats, .csm-check-grid { grid-template-columns: 1fr; }
                 .csm-nav-btn { width: 100%; justify-content: center; }
             }
+            .select2-container--default .select2-selection--multiple {
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                min-height: 38px;
+                padding: 2px 6px;
+            }
+            .select2-container--default.select2-container--focus .select2-selection--multiple {
+                border-color: #1267b3;
+            }
+            .select2-container--default .select2-selection--multiple .select2-selection__choice {
+                background-color: #12589b;
+                border: 1px solid #0f4b85;
+                color: #fff;
+                border-radius: 4px;
+                padding: 2px 8px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            .select2-container--default .select2-selection--multiple .select2-selection__choice__remove {
+                color: #fff;
+                margin-right: 5px;
+            }
+            .select2-dropdown {
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+                z-index: 999999;
+            }
         </style>
+        <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+        <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
         <script>
         function csmConfirmDelete(url, text) {
@@ -701,7 +757,7 @@ if (!function_exists('csm_render_footer')) {
 }
 
 /**
- * Page: Custom Customers & Ledger
+ * Page: Custom Customers & Ledger (Client Custom Services Tracker)
  */
 if (!function_exists('csm_render_custom_customers_page')) {
     function csm_render_custom_customers_page($vars)
@@ -711,10 +767,10 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
         $html = '';
         if (isset($_GET['saved'])) {
-            $html .= '<div class="alert alert-success"><i class="fas fa-check-circle"></i> Custom Customer record saved successfully.</div>';
+            $html .= '<div class="alert alert-success"><i class="fas fa-check-circle"></i> Ledger record(s) saved successfully.</div>';
         }
         if (isset($_GET['deleted'])) {
-            $html .= '<div class="alert alert-info"><i class="fas fa-info-circle"></i> Custom Customer record deleted.</div>';
+            $html .= '<div class="alert alert-info"><i class="fas fa-info-circle"></i> Ledger record deleted.</div>';
         }
 
         $defaultCurrency = null;
@@ -726,7 +782,10 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
         $existingClients = [];
         try {
-            $existingClients = Capsule::table('tblclients')->select('id', 'firstname', 'lastname', 'companyname', 'email', 'phonenumber')->orderBy('firstname', 'ASC')->get();
+            $existingClients = Capsule::table('tblclients')
+                ->select('id', 'firstname', 'lastname', 'companyname', 'email', 'phonenumber')
+                ->orderBy('firstname', 'ASC')
+                ->get();
         } catch (\Exception $e) {}
 
         $totalCustom = $customers->count();
@@ -735,11 +794,11 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
         $html .= '<div class="csm-stats" style="grid-template-columns: repeat(3, 1fr);">
             <div class="csm-stat">
-                <div class="csm-stat-label">Total Custom Customers</div>
+                <div class="csm-stat-label">Total Ledger Entries</div>
                 <div class="csm-stat-value">' . $totalCustom . '</div>
             </div>
             <div class="csm-stat">
-                <div class="csm-stat-label">Active Custom Services</div>
+                <div class="csm-stat-label">Active Services</div>
                 <div class="csm-stat-value" style="color:#16a34a;">' . $activeCount . '</div>
             </div>
             <div class="csm-stat">
@@ -751,25 +810,25 @@ if (!function_exists('csm_render_custom_customers_page')) {
         $html .= '<div class="csm-table-card">
             <div class="csm-table-header">
                 <div>
-                    <h3><i class="fas fa-users-gear text-primary"></i> Custom Customers &amp; Offline Services Ledger</h3>
-                    <div class="csm-muted">Manage clients, offline hosting/domain subscriptions, due amounts, and payment notes.</div>
+                    <h3><i class="fas fa-users-gear text-primary"></i> Client Custom Services &amp; Due Ledger</h3>
+                    <div class="csm-muted">Manage WHMCS clients, custom services, billing schedules, and payment notes.</div>
                 </div>
                 <div>
-                    <button class="btn btn-primary" onclick="openAddCustomerModal()"><i class="fas fa-plus"></i> Add Custom Customer</button>
+                    <button class="btn btn-primary" onclick="openAddCustomerModal()"><i class="fas fa-plus"></i> Add Clients to Ledger</button>
                 </div>
             </div>
             <div style="overflow-x:auto;">
                 <table class="csm-table">
                     <thead>
                         <tr>
-                            <th>Customer &amp; Contact</th>
+                            <th>Client &amp; Contact</th>
                             <th>Service / Domain</th>
                             <th>Billing Amount</th>
                             <th>Cycle</th>
                             <th>Due Date</th>
                             <th>Status</th>
                             <th>Due Note / Remarks</th>
-                            <th>Actions</th>
+                            <th width="80" class="text-center">Actions</th>
                         </tr>
                     </thead>
                     <tbody>';
@@ -777,17 +836,20 @@ if (!function_exists('csm_render_custom_customers_page')) {
         if ($customers->isEmpty()) {
             $html .= '<tr><td colspan="8" style="text-align:center;padding:40px;color:#64748b;">
                 <i class="fas fa-folder-open" style="font-size:32px;margin-bottom:10px;display:block;opacity:0.5;"></i>
-                No custom customer entries found. Click <strong>"Add Custom Customer"</strong> to create one.
+                No ledger entries found. Click <strong>"Add Clients to Ledger"</strong> to create records for WHMCS clients.
             </td></tr>';
         } else {
             foreach ($customers as $c) {
                 $statusClass = strtolower($c->status) === 'active' ? 'active' : (strtolower($c->status) === 'unpaid' ? 'overdue' : 'warning');
+                $rawPhone = str_replace('.', ' ', $c->phone ?: '');
                 $waPhone = preg_replace('/[^0-9]/', '', $c->phone ?: '');
                 $waBtn = !empty($waPhone) ? '<a href="https://wa.me/' . $waPhone . '" target="_blank" class="btn btn-success btn-xs" style="margin-left:4px;" title="WhatsApp"><i class="fab fa-whatsapp"></i></a>' : '';
 
-                $clientBadge = '';
+                $clientLink = '';
                 if (!empty($c->userid)) {
-                    $clientBadge = ' <a href="clientssummary.php?userid=' . (int)$c->userid . '" target="_blank" class="btn btn-default btn-xs" style="margin-left:4px;padding:1px 6px;font-size:11px;" title="View WHMCS Client Profile"><i class="fas fa-user-check text-primary"></i> Client #' . (int)$c->userid . '</a>';
+                    $clientLink = '<a href="clientssummary.php?userid=' . (int)$c->userid . '" target="_blank" style="font-weight:700;color:#0f5ea8;">' . csm_h($c->customer_name) . '</a> <a href="clientssummary.php?userid=' . (int)$c->userid . '" target="_blank" class="btn btn-default btn-xs" style="margin-left:4px;padding:1px 6px;font-size:10px;" title="WHMCS Client Profile"><i class="fas fa-user-check text-primary"></i> #' . (int)$c->userid . '</a>';
+                } else {
+                    $clientLink = '<strong>' . csm_h($c->customer_name) . '</strong>';
                 }
 
                 // Get latest note
@@ -801,22 +863,22 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
                 $html .= '<tr>
                     <td>
-                        <strong>' . csm_h($c->customer_name) . '</strong>' . $clientBadge . '
+                        ' . $clientLink . '
                         ' . ($c->company_name ? '<br><small class="text-muted">' . csm_h($c->company_name) . '</small>' : '') . '
-                        <br><small><i class="fas fa-phone"></i> ' . csm_h(str_replace('.', ' ', $c->phone ?: 'N/A')) . '</small> ' . $waBtn . '
+                        <br><small><i class="fas fa-phone"></i> ' . csm_h($rawPhone ?: 'N/A') . '</small> ' . $waBtn . '
                     </td>
                     <td>
                         <strong>' . csm_h($c->service_name) . '</strong>
-                        ' . ($c->domain ? '<br><small style="color:#1d4ed8;">' . csm_h($c->domain) . '</small>' : '') . '
+                        ' . ($c->domain ? '<br><small style="color:#1d4ed8;"><i class="fas fa-globe"></i> ' . csm_h($c->domain) . '</small>' : '') . '
                     </td>
                     <td><strong>' . $currPrefix . number_format((float)$c->amount, 2) . $currSuffix . '</strong></td>
                     <td>' . csm_h($c->billing_cycle) . '</td>
                     <td>' . ($c->next_due_date ? date('d/m/Y', strtotime($c->next_due_date)) : 'N/A') . '</td>
                     <td><span class="csm-badge csm-badge-' . $statusClass . '">' . csm_h($c->status) . '</span></td>
                     <td>' . $notePreview . ' <button class="btn btn-default btn-xs" onclick="openNoteModal(\'custom_customer\', ' . $c->id . ', \'' . csm_h(addslashes($c->customer_name)) . '\', ' . (float)$c->amount . ')" title="Add / View Note"><i class="fas fa-edit"></i></button></td>
-                    <td>
+                    <td class="text-center" style="white-space:nowrap;">
                         <button class="btn btn-default btn-xs" onclick=\'editCustomer(' . json_encode($c) . ')\' title="Edit"><i class="fas fa-pen"></i></button>
-                        <a href="' . csm_h($moduleLink) . '&action=delete_custom_customer&id=' . $c->id . '" class="btn btn-danger btn-xs" onclick="return csmConfirmDelete(this.href, \'Delete this customer record and associated notes?\')" title="Delete"><i class="fas fa-trash"></i></a>
+                        <a href="' . csm_h($moduleLink) . '&action=delete_custom_customer&id=' . $c->id . '" class="btn btn-danger btn-xs" onclick="return csmConfirmDelete(this.href, \'Delete this ledger record and associated notes?\')" title="Delete"><i class="fas fa-trash"></i></a>
                     </td>
                 </tr>';
             }
@@ -825,15 +887,13 @@ if (!function_exists('csm_render_custom_customers_page')) {
         $html .= '</tbody></table></div></div>';
 
         // Add / Edit Modal
-        $clientOptionsHtml = '<option value="">-- Or enter custom / offline client manually below --</option>';
+        $clientOptionsHtml = '';
         if (!empty($existingClients)) {
             foreach ($existingClients as $cl) {
-                $clientOptionsHtml .= '<option value="' . $cl->id . '"'
-                    . ' data-name="' . csm_h(trim($cl->firstname . ' ' . $cl->lastname)) . '"'
-                    . ' data-company="' . csm_h($cl->companyname ?: '') . '"'
-                    . ' data-email="' . csm_h($cl->email) . '"'
-                    . ' data-phone="' . csm_h(str_replace('.', ' ', $cl->phonenumber ?: '')) . '">'
-                    . '#' . $cl->id . ' - ' . csm_h(trim($cl->firstname . ' ' . $cl->lastname) . ($cl->companyname ? ' (' . $cl->companyname . ')' : '') . ' - ' . $cl->email)
+                $phoneClean = str_replace('.', ' ', $cl->phonenumber ?: '');
+                $compClean = $cl->companyname ? ' (' . $cl->companyname . ')' : '';
+                $clientOptionsHtml .= '<option value="' . $cl->id . '">'
+                    . '#' . $cl->id . ' - ' . csm_h(trim($cl->firstname . ' ' . $cl->lastname)) . csm_h($compClean) . ' - ' . csm_h($cl->email) . ($phoneClean ? ' | ' . csm_h($phoneClean) : '')
                     . '</option>';
             }
         }
@@ -847,50 +907,32 @@ if (!function_exists('csm_render_custom_customers_page')) {
                         <input type="hidden" name="userid" id="csmCustUserId" value="0">
                         <div class="modal-header" style="background:#12589b;color:#fff;border-radius:7px 7px 0 0;">
                             <button type="button" class="close" data-dismiss="modal" style="color:#fff;opacity:0.9;">&times;</button>
-                            <h4 class="modal-title" id="modalCustomerTitle"><i class="fas fa-user-plus"></i> Add Custom Customer</h4>
+                            <h4 class="modal-title" id="modalCustomerTitle"><i class="fas fa-users-gear"></i> Add Clients to Ledger</h4>
                         </div>
                         <div class="modal-body" style="padding:20px;">
-                            <div class="form-group" style="background:#f1f5f9;padding:12px;border-radius:6px;border:1px solid #cbd5e1;margin-bottom:16px;">
-                                <label style="color:#0f5ea8;font-weight:700;"><i class="fas fa-user-check"></i> Select Existing WHMCS Client (Optional):</label>
-                                <select id="csmSelectExistingClient" class="form-control" onchange="csmOnSelectExistingClient(this)">
+                            <div class="form-group" style="background:#f8fafc;padding:12px;border-radius:6px;border:1px solid #cbd5e1;margin-bottom:16px;">
+                                <label style="color:#0f5ea8;font-weight:700;"><i class="fas fa-users"></i> Search &amp; Select WHMCS Client(s) <span class="text-danger">*</span></label>
+                                <select name="client_ids[]" id="csmSelectClients" class="form-control" multiple="multiple" style="width:100%;" required>
                                     ' . $clientOptionsHtml . '
                                 </select>
-                                <small class="text-muted" style="display:block;margin-top:4px;">Selecting an existing client will auto-fill Name, Company, Phone, and Email.</small>
+                                <small class="text-muted" style="display:block;margin-top:6px;">
+                                    <i class="fas fa-search"></i> Search by client name, email, phone, or company. Select one or multiple clients.
+                                </small>
                             </div>
 
                             <div class="row">
                                 <div class="col-md-6 form-group">
-                                    <label>Customer Name <span class="text-danger">*</span></label>
-                                    <input type="text" name="customer_name" id="csmCustName" class="form-control" required placeholder="e.g. Rahim Khan">
+                                    <label>Service / Item Title <span class="text-danger">*</span></label>
+                                    <input type="text" name="service_name" id="csmCustService" class="form-control" required placeholder="e.g. Dedicated Server / Web Maintenance">
                                 </div>
                                 <div class="col-md-6 form-group">
-                                    <label>Company Name</label>
-                                    <input type="text" name="company_name" id="csmCustCompany" class="form-control" placeholder="Optional">
-                                </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-6 form-group">
-                                    <label>Phone / WhatsApp Number</label>
-                                    <input type="text" name="phone" id="csmCustPhone" class="form-control" placeholder="e.g. 017xxxxxxxx">
-                                </div>
-                                <div class="col-md-6 form-group">
-                                    <label>Email Address</label>
-                                    <input type="email" name="email" id="csmCustEmail" class="form-control" placeholder="e.g. client@example.com">
-                                </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-6 form-group">
-                                    <label>Service Name <span class="text-danger">*</span></label>
-                                    <input type="text" name="service_name" id="csmCustService" class="form-control" required placeholder="e.g. Premium BDIX Hosting">
-                                </div>
-                                <div class="col-md-6 form-group">
-                                    <label>Domain Name</label>
-                                    <input type="text" name="domain" id="csmCustDomain" class="form-control" placeholder="e.g. rahimshop.com">
+                                    <label>Domain Name (Optional)</label>
+                                    <input type="text" name="domain" id="csmCustDomain" class="form-control" placeholder="e.g. clientdomain.com">
                                 </div>
                             </div>
                             <div class="row">
                                 <div class="col-md-4 form-group">
-                                    <label>Amount / Due</label>
+                                    <label>Amount / Due (৳) <span class="text-danger">*</span></label>
                                     <input type="number" step="0.01" name="amount" id="csmCustAmount" class="form-control" value="0.00" required>
                                 </div>
                                 <div class="col-md-4 form-group">
@@ -926,7 +968,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                         </div>
                         <div class="modal-footer" style="background:#f8fafc;">
                             <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
-                            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Customer</button>
+                            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save to Ledger</button>
                         </div>
                     </form>
                 </div>
@@ -934,28 +976,22 @@ if (!function_exists('csm_render_custom_customers_page')) {
         </div>
 
         <script>
-        function csmOnSelectExistingClient(el) {
-            var opt = el.options[el.selectedIndex];
-            if (opt && opt.value) {
-                document.getElementById("csmCustUserId").value = opt.value;
-                document.getElementById("csmCustName").value = opt.getAttribute("data-name") || "";
-                document.getElementById("csmCustCompany").value = opt.getAttribute("data-company") || "";
-                document.getElementById("csmCustPhone").value = opt.getAttribute("data-phone") || "";
-                document.getElementById("csmCustEmail").value = opt.getAttribute("data-email") || "";
-            } else {
-                document.getElementById("csmCustUserId").value = "0";
+        $(document).ready(function() {
+            if ($.fn.select2) {
+                $("#csmSelectClients").select2({
+                    placeholder: "Search client by name, email, phone, company...",
+                    allowClear: true,
+                    width: "100%",
+                    dropdownParent: $("#csmCustomerModal")
+                });
             }
-        }
+        });
 
         function openAddCustomerModal() {
             document.getElementById("modalCustomerId").value = "0";
             document.getElementById("csmCustUserId").value = "0";
-            document.getElementById("csmSelectExistingClient").value = "";
-            document.getElementById("modalCustomerTitle").innerHTML = "<i class=\'fas fa-user-plus\'></i> Add Custom Customer";
-            document.getElementById("csmCustName").value = "";
-            document.getElementById("csmCustCompany").value = "";
-            document.getElementById("csmCustPhone").value = "";
-            document.getElementById("csmCustEmail").value = "";
+            document.getElementById("modalCustomerTitle").innerHTML = "<i class=\'fas fa-user-plus\'></i> Add Clients to Ledger";
+            $("#csmSelectClients").val(null).trigger("change");
             document.getElementById("csmCustService").value = "";
             document.getElementById("csmCustDomain").value = "";
             document.getElementById("csmCustAmount").value = "0.00";
@@ -969,12 +1005,12 @@ if (!function_exists('csm_render_custom_customers_page')) {
         function editCustomer(item) {
             document.getElementById("modalCustomerId").value = item.id;
             document.getElementById("csmCustUserId").value = item.userid || "0";
-            document.getElementById("csmSelectExistingClient").value = item.userid ? String(item.userid) : "";
-            document.getElementById("modalCustomerTitle").innerHTML = "<i class=\'fas fa-edit\'></i> Edit Custom Customer";
-            document.getElementById("csmCustName").value = item.customer_name || "";
-            document.getElementById("csmCustCompany").value = item.company_name || "";
-            document.getElementById("csmCustPhone").value = item.phone || "";
-            document.getElementById("csmCustEmail").value = item.email || "";
+            document.getElementById("modalCustomerTitle").innerHTML = "<i class=\'fas fa-edit\'></i> Edit Ledger Entry";
+            if (item.userid) {
+                $("#csmSelectClients").val([String(item.userid)]).trigger("change");
+            } else {
+                $("#csmSelectClients").val(null).trigger("change");
+            }
             document.getElementById("csmCustService").value = item.service_name || "";
             document.getElementById("csmCustDomain").value = item.domain || "";
             document.getElementById("csmCustAmount").value = item.amount || "0.00";
@@ -1164,12 +1200,9 @@ if (!function_exists('csm_render_due_notes_page')) {
         $moduleLink = $vars['modulelink'];
         $notes = Capsule::table('mod_csm_service_notes')->orderBy('id', 'DESC')->take(200)->get();
 
-        $defaultCurrency = null;
-        try {
-            $defaultCurrency = Capsule::table('tblcurrencies')->where('default', 1)->first() ?: Capsule::table('tblcurrencies')->first();
-        } catch (\Exception $e) {}
-        $currPrefix = ($defaultCurrency && !empty($defaultCurrency->prefix)) ? $defaultCurrency->prefix : '৳ ';
-        $currSuffix = ($defaultCurrency && !empty($defaultCurrency->suffix)) ? $defaultCurrency->suffix : '';
+        $activeCurrency = csm_get_active_currency();
+        $currPrefix = ($activeCurrency && !empty($activeCurrency->prefix)) ? $activeCurrency->prefix : '৳ ';
+        $currSuffix = ($activeCurrency && !empty($activeCurrency->suffix)) ? $activeCurrency->suffix : '';
 
         $html = '';
         if (isset($_GET['saved'])) {
@@ -1309,6 +1342,22 @@ if (!function_exists('csm_render_module_setup_page')) {
             $html .= '<div class="alert alert-success"><i class="fas fa-check-circle"></i> Module Setup settings saved successfully.</div>';
         }
 
+        $currencies = [];
+        try {
+            $currencies = Capsule::table('tblcurrencies')->orderBy('default', 'DESC')->orderBy('code', 'ASC')->get();
+        } catch (\Exception $e) {}
+        $selectedCurrencyId = (int) csm_get_setting('display_currency_id', '0');
+
+        $currencyOptionsHtml = '<option value="0"' . ($selectedCurrencyId === 0 ? ' selected' : '') . '>Auto (Use Client Profile Currency / WHMCS Default)</option>';
+        if (!empty($currencies)) {
+            foreach ($currencies as $cur) {
+                $sym = trim(($cur->prefix ?: '') . ' ' . ($cur->suffix ?: ''));
+                $currencyOptionsHtml .= '<option value="' . $cur->id . '"' . ($selectedCurrencyId === (int)$cur->id ? ' selected' : '') . '>'
+                    . csm_h($cur->code) . ($sym ? ' (' . csm_h($sym) . ')' : '') . ($cur->default ? ' [WHMCS Default]' : '')
+                    . '</option>';
+            }
+        }
+
         $html .= '<form method="post" action="' . csm_h($moduleLink) . '&action=save_module_setup">
             <div class="csm-card">
                 <div class="csm-card-header">
@@ -1317,12 +1366,22 @@ if (!function_exists('csm_render_module_setup_page')) {
                 <div class="csm-card-body">
                     <div class="row">
                         <div class="col-md-6 form-group">
-                            <label>Expiring Soon Warning (Days)</label>
+                            <label><i class="fas fa-coins text-primary"></i> Module Calculation &amp; Display Currency</label>
+                            <select name="display_currency_id" class="form-control">
+                                ' . $currencyOptionsHtml . '
+                            </select>
+                            <small class="help-block">Select a fixed currency for all calculations &amp; symbols across this module, or keep Auto.</small>
+                        </div>
+                        <div class="col-md-6 form-group">
+                            <label><i class="fas fa-exclamation-triangle text-warning"></i> Expiring Soon Warning (Days)</label>
                             <input type="number" name="highlight_days" class="form-control" value="' . $highlightDays . '" min="1" max="60" required>
                             <small class="help-block">Services expiring within this number of days will be highlighted with orange/red badges.</small>
                         </div>
-                        <div class="col-md-6 form-group">
-                            <label>Default WhatsApp Country Code</label>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-12 form-group">
+                            <label><i class="fab fa-whatsapp text-success"></i> Default WhatsApp Country Code</label>
                             <input type="text" name="default_country_code" class="form-control" value="' . csm_h($countryCode) . '" placeholder="880" required>
                             <small class="help-block">E.g. <code>880</code> for Bangladesh if customer phone numbers start with 017...</small>
                         </div>
@@ -1555,12 +1614,12 @@ if (!function_exists('client_services_monitor_output')) {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             if ($action === 'save_custom_customer') {
                 $cId = (int)($_POST['customer_id'] ?? 0);
-                $userId = (int)($_POST['userid'] ?? 0);
-                $name = trim($_POST['customer_name'] ?? '');
-                $company = trim($_POST['company_name'] ?? '');
-                $phone = trim($_POST['phone'] ?? '');
-                $email = trim($_POST['email'] ?? '');
-                $service = trim($_POST['service_name'] ?? '');
+                $clientIds = isset($_POST['client_ids']) ? (array)$_POST['client_ids'] : [];
+                if (empty($clientIds) && !empty($_POST['userid'])) {
+                    $clientIds = [(int)$_POST['userid']];
+                }
+
+                $service = trim($_POST['service_name'] ?? 'Custom Service');
                 $domain = trim($_POST['domain'] ?? '');
                 $amount = (float)($_POST['amount'] ?? 0);
                 $cycle = trim($_POST['billing_cycle'] ?? 'Monthly');
@@ -1570,6 +1629,13 @@ if (!function_exists('client_services_monitor_output')) {
                 $now = date('Y-m-d H:i:s');
 
                 if ($cId > 0) {
+                    $userId = !empty($clientIds) ? (int)$clientIds[0] : (int)($_POST['userid'] ?? 0);
+                    $client = $userId > 0 ? Capsule::table('tblclients')->where('id', $userId)->first() : null;
+                    $name = $client ? trim($client->firstname . ' ' . $client->lastname) : trim($_POST['customer_name'] ?? 'Client #' . $userId);
+                    $company = $client ? $client->companyname : trim($_POST['company_name'] ?? '');
+                    $phone = $client ? $client->phonenumber : trim($_POST['phone'] ?? '');
+                    $email = $client ? $client->email : trim($_POST['email'] ?? '');
+
                     Capsule::table('mod_csm_custom_customers')->where('id', $cId)->update([
                         'userid'        => $userId > 0 ? $userId : null,
                         'customer_name' => $name,
@@ -1586,32 +1652,41 @@ if (!function_exists('client_services_monitor_output')) {
                         'updated_at'    => $now,
                     ]);
                 } else {
-                    $newCustId = Capsule::table('mod_csm_custom_customers')->insertGetId([
-                        'userid'        => $userId > 0 ? $userId : null,
-                        'customer_name' => $name,
-                        'company_name'  => $company,
-                        'phone'         => $phone,
-                        'email'         => $email,
-                        'service_name'  => $service,
-                        'domain'        => $domain,
-                        'amount'        => $amount,
-                        'billing_cycle' => $cycle,
-                        'next_due_date' => $due,
-                        'status'        => $status,
-                        'notes'         => $notes,
-                        'created_at'    => $now,
-                        'updated_at'    => $now,
-                    ]);
+                    if (!empty($clientIds)) {
+                        foreach ($clientIds as $uId) {
+                            $uId = (int)$uId;
+                            if ($uId <= 0) continue;
+                            $client = Capsule::table('tblclients')->where('id', $uId)->first();
+                            if (!$client) continue;
 
-                    if (!empty($notes)) {
-                        Capsule::table('mod_csm_service_notes')->insert([
-                            'rel_type' => 'custom_customer',
-                            'rel_id' => $newCustId,
-                            'note' => $notes,
-                            'due_amount' => $amount,
-                            'created_at' => $now,
-                            'updated_at' => $now,
-                        ]);
+                            $newCustId = Capsule::table('mod_csm_custom_customers')->insertGetId([
+                                'userid'        => $uId,
+                                'customer_name' => trim($client->firstname . ' ' . $client->lastname),
+                                'company_name'  => $client->companyname ?: '',
+                                'phone'         => $client->phonenumber ?: '',
+                                'email'         => $client->email ?: '',
+                                'service_name'  => $service,
+                                'domain'        => $domain,
+                                'amount'        => $amount,
+                                'billing_cycle' => $cycle,
+                                'next_due_date' => $due,
+                                'status'        => $status,
+                                'notes'         => $notes,
+                                'created_at'    => $now,
+                                'updated_at'    => $now,
+                            ]);
+
+                            if (!empty($notes)) {
+                                Capsule::table('mod_csm_service_notes')->insert([
+                                    'rel_type'   => 'custom_customer',
+                                    'rel_id'     => $newCustId,
+                                    'note'       => $notes,
+                                    'due_amount' => $amount,
+                                    'created_at' => $now,
+                                    'updated_at' => $now,
+                                ]);
+                            }
+                        }
                     }
                 }
 
@@ -1679,6 +1754,7 @@ if (!function_exists('client_services_monitor_output')) {
             }
 
             if ($action === 'save_module_setup') {
+                csm_save_setting('display_currency_id', (int)($_POST['display_currency_id'] ?? 0));
                 csm_save_setting('highlight_days', (int)($_POST['highlight_days'] ?? 7));
                 csm_save_setting('default_country_code', trim($_POST['default_country_code'] ?? '880'));
                 csm_save_setting('wa_template', trim($_POST['wa_template'] ?? ''));
@@ -1776,6 +1852,9 @@ if (!function_exists('client_services_monitor_fetch_data')) {
 
         $defaultCountryCode = preg_replace('/[^0-9]/', '', csm_get_setting('default_country_code', '880'));
         $warningDays = (int) csm_get_setting('highlight_days', '7');
+
+        $chosenCurrId = (int) csm_get_setting('display_currency_id', '0');
+        $chosenCurrency = $chosenCurrId > 0 ? Capsule::table('tblcurrencies')->where('id', $chosenCurrId)->first() : null;
 
         $allCurrencies = Capsule::table('tblcurrencies')->get()->keyBy('id');
         $defaultCurrency = Capsule::table('tblcurrencies')->where('default', 1)->first() ?: Capsule::table('tblcurrencies')->first();
@@ -1979,7 +2058,7 @@ if (!function_exists('client_services_monitor_fetch_data')) {
         $todayTs = strtotime(date('Y-m-d'));
 
         foreach ($records as $row) {
-            $curr = $allCurrencies->get($row->client_currency) ?: $defaultCurrency;
+            $curr = $chosenCurrency ?: ($allCurrencies->get($row->client_currency) ?: $defaultCurrency);
             $prefix = $curr ? $curr->prefix : '';
             $suffix = $curr && !empty($curr->suffix) ? $curr->suffix : '';
 
