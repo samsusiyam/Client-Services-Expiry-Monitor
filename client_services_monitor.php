@@ -911,7 +911,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
         $allClients = [];
         try {
             $allClients = Capsule::table('tblclients')
-                ->select('id', 'firstname', 'lastname', 'companyname', 'email', 'phonenumber')
+                ->select('id', 'firstname', 'lastname', 'companyname', 'email', 'phonenumber', 'status', 'currency')
                 ->orderBy('firstname', 'ASC')
                 ->get();
         } catch (\Exception $e) {}
@@ -945,7 +945,26 @@ if (!function_exists('csm_render_custom_customers_page')) {
             }
         }
 
-        $monitoredClients = !empty($monitoredUserIds) ? Capsule::table('tblclients')->whereIn('id', $monitoredUserIds)->orderBy('firstname', 'ASC')->get()->keyBy('id') : collect([]);
+        $monitoredClients = !empty($monitoredUserIds) ? Capsule::table('tblclients')->whereIn('id', $monitoredUserIds)->select('id', 'firstname', 'lastname', 'companyname', 'email', 'phonenumber', 'status', 'currency')->orderBy('firstname', 'ASC')->get()->keyBy('id') : collect([]);
+
+        // Fetch Unpaid Invoices Due for Monitored Clients in bulk
+        $clientUnpaidInvoices = [];
+        if (!empty($monitoredUserIds)) {
+            try {
+                $invRows = Capsule::table('tblinvoices')
+                    ->whereIn('userid', $monitoredUserIds)
+                    ->where('status', 'Unpaid')
+                    ->select('userid', Capsule::raw('SUM(total) as total_due'), Capsule::raw('COUNT(id) as unpaid_count'))
+                    ->groupBy('userid')
+                    ->get();
+                foreach ($invRows as $inv) {
+                    $clientUnpaidInvoices[$inv->userid] = [
+                        'total_due' => (float)$inv->total_due,
+                        'count'     => (int)$inv->unpaid_count,
+                    ];
+                }
+            } catch (\Exception $e) {}
+        }
 
         // Fetch WHMCS Services for Monitored Clients
         $services = collect([]);
@@ -1066,12 +1085,40 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 return $item->rel_type . '_' . $item->rel_id;
             });
 
-        // Unify All Records
-        $unifiedRecords = [];
+        // Grouping Data by Client
+        $clientGroups = [];
 
-        // 1. WHMCS Services
+        // 1. Initialize registered monitored WHMCS clients
+        if (!empty($monitoredClients)) {
+            foreach ($monitoredClients as $mc) {
+                $key = 'client_' . $mc->id;
+                $clientGroups[$key] = [
+                    'group_key'         => $key,
+                    'is_whmcs'          => true,
+                    'userid'            => (int)$mc->id,
+                    'client_name'       => trim($mc->firstname . ' ' . $mc->lastname),
+                    'company'           => $mc->companyname ?: '',
+                    'email'             => $mc->email ?: '',
+                    'phone'             => $mc->phonenumber ?: '',
+                    'client_status'     => $mc->status ?: 'Active',
+                    'currency'          => $mc->currency,
+                    'monitor_mode'      => isset($monitoredRows[$mc->id]) ? $monitoredRows[$mc->id]->monitor_mode : 'all',
+                    'items'             => [],
+                    'unpaid_inv_due'    => $clientUnpaidInvoices[$mc->id]['total_due'] ?? 0.00,
+                    'unpaid_inv_count'  => $clientUnpaidInvoices[$mc->id]['count'] ?? 0,
+                    'total_recurring'   => 0.00,
+                    'earliest_due_date' => null,
+                    'earliest_due_days' => 999999,
+                    'earliest_due_cat'  => 'normal',
+                ];
+            }
+        }
+
+        // 2. Attach WHMCS Services
         foreach ($services as $srv) {
-            $unifiedRecords[] = [
+            $key = 'client_' . $srv->userid;
+            if (!isset($clientGroups[$key])) continue;
+            $clientGroups[$key]['items'][] = [
                 'id'           => $srv->item_id,
                 'record_type'  => 'service',
                 'userid'       => $srv->userid,
@@ -1093,9 +1140,11 @@ if (!function_exists('csm_render_custom_customers_page')) {
             ];
         }
 
-        // 2. WHMCS Domains
+        // 3. Attach WHMCS Domains
         foreach ($domains as $dom) {
-            $unifiedRecords[] = [
+            $key = 'client_' . $dom->userid;
+            if (!isset($clientGroups[$key])) continue;
+            $clientGroups[$key]['items'][] = [
                 'id'           => $dom->item_id,
                 'record_type'  => 'domain',
                 'userid'       => $dom->userid,
@@ -1117,93 +1166,176 @@ if (!function_exists('csm_render_custom_customers_page')) {
             ];
         }
 
-        // 3. Custom / Offline Services
+        // 4. Attach Custom / Offline Services
         foreach ($customServices as $cust) {
-            $unifiedRecords[] = [
-                'id'           => $cust->id,
-                'record_type'  => 'custom_customer',
-                'userid'       => $cust->userid,
-                'client_name'  => $cust->customer_name ?: 'Custom Client',
-                'company'      => $cust->company_name ?: '',
-                'email'        => $cust->email ?: '',
-                'phone'        => $cust->phone ?: '',
-                'product_name' => $cust->service_name,
-                'product_type' => 'custom',
-                'group_name'   => 'Offline / Custom Service',
-                'server_id'    => 0,
-                'server_name'  => '',
-                'domain'       => $cust->domain ?: '',
-                'price'        => (float)$cust->amount,
-                'billing_cycle'=> $cust->billing_cycle,
-                'next_due_date'=> $cust->next_due_date,
-                'status'       => $cust->status,
-                'is_custom'    => true,
-                'raw_cust_obj' => $cust,
-            ];
+            $custUserId = (int)($cust->userid ?? 0);
+            if ($custUserId > 0 && isset($clientGroups['client_' . $custUserId])) {
+                $key = 'client_' . $custUserId;
+                $clientGroups[$key]['items'][] = [
+                    'id'           => $cust->id,
+                    'record_type'  => 'custom_customer',
+                    'userid'       => $custUserId,
+                    'client_name'  => $clientGroups[$key]['client_name'],
+                    'company'      => $clientGroups[$key]['company'],
+                    'email'        => $clientGroups[$key]['email'],
+                    'phone'        => $clientGroups[$key]['phone'],
+                    'product_name' => $cust->service_name,
+                    'product_type' => 'custom',
+                    'group_name'   => 'Offline / Custom Service',
+                    'server_id'    => 0,
+                    'server_name'  => '',
+                    'domain'       => $cust->domain ?: '',
+                    'price'        => (float)$cust->amount,
+                    'billing_cycle'=> $cust->billing_cycle,
+                    'next_due_date'=> $cust->next_due_date,
+                    'status'       => $cust->status,
+                    'is_custom'    => true,
+                    'raw_cust_obj' => $cust,
+                ];
+                if (strtolower($cust->status) === 'unpaid') {
+                    $clientGroups[$key]['unpaid_inv_due'] += (float)$cust->amount;
+                    $clientGroups[$key]['unpaid_inv_count'] += 1;
+                }
+            } else {
+                // Standalone Offline / Non-WHMCS Custom Customer
+                $key = 'offline_' . $cust->id;
+                $clientGroups[$key] = [
+                    'group_key'         => $key,
+                    'is_whmcs'          => false,
+                    'userid'            => 0,
+                    'client_name'       => $cust->customer_name ?: 'Custom Client',
+                    'company'           => $cust->company_name ?: '',
+                    'email'             => $cust->email ?: '',
+                    'phone'             => $cust->phone ?: '',
+                    'client_status'     => $cust->status ?: 'Active',
+                    'currency'          => 0,
+                    'monitor_mode'      => 'custom',
+                    'items'             => [
+                        [
+                            'id'           => $cust->id,
+                            'record_type'  => 'custom_customer',
+                            'userid'       => 0,
+                            'client_name'  => $cust->customer_name ?: 'Custom Client',
+                            'company'      => $cust->company_name ?: '',
+                            'email'        => $cust->email ?: '',
+                            'phone'        => $cust->phone ?: '',
+                            'product_name' => $cust->service_name,
+                            'product_type' => 'custom',
+                            'group_name'   => 'Offline / Custom Service',
+                            'server_id'    => 0,
+                            'server_name'  => '',
+                            'domain'       => $cust->domain ?: '',
+                            'price'        => (float)$cust->amount,
+                            'billing_cycle'=> $cust->billing_cycle,
+                            'next_due_date'=> $cust->next_due_date,
+                            'status'       => $cust->status,
+                            'is_custom'    => true,
+                            'raw_cust_obj' => $cust,
+                        ]
+                    ],
+                    'unpaid_inv_due'    => (strtolower($cust->status) === 'unpaid' ? (float)$cust->amount : 0.00),
+                    'unpaid_inv_count'  => (strtolower($cust->status) === 'unpaid' ? 1 : 0),
+                    'total_recurring'   => (float)$cust->amount,
+                    'earliest_due_date' => $cust->next_due_date,
+                    'earliest_due_days' => 999999,
+                    'earliest_due_cat'  => 'normal',
+                ];
+            }
         }
 
-        // Sort by next_due_date ASC
-        usort($unifiedRecords, function ($a, $b) {
-            $dateA = !empty($a['next_due_date']) && $a['next_due_date'] !== '0000-00-00' ? $a['next_due_date'] : '9999-12-31';
-            $dateB = !empty($b['next_due_date']) && $b['next_due_date'] !== '0000-00-00' ? $b['next_due_date'] : '9999-12-31';
+        // 5. Compute Client Metrics, Earliest Due Date & Sort Items per Client
+        $totalClientsCount = count($clientGroups);
+        $totalActiveServicesCount = 0;
+        $globalDueTodayCount = 0;
+        $globalDue7DaysCount = 0;
+        $globalOverdueCount = 0;
+        $globalTotalDueAmount = 0.00;
+
+        foreach ($clientGroups as $k => &$grp) {
+            $grpRecurring = 0.00;
+            $earliestDate = null;
+            $minDays = 999999;
+            $earliestCat = 'normal';
+
+            // Sort client's items by next_due_date ASC
+            usort($grp['items'], function ($a, $b) {
+                $dateA = !empty($a['next_due_date']) && $a['next_due_date'] !== '0000-00-00' ? $a['next_due_date'] : '9999-12-31';
+                $dateB = !empty($b['next_due_date']) && $b['next_due_date'] !== '0000-00-00' ? $b['next_due_date'] : '9999-12-31';
+                return strcmp($dateA, $dateB);
+            });
+
+            foreach ($grp['items'] as $item) {
+                $st = strtolower($item['status']);
+                if ($st === 'active') {
+                    $totalActiveServicesCount++;
+                    $grpRecurring += (float)$item['price'];
+                }
+
+                if (!empty($item['next_due_date']) && $item['next_due_date'] !== '0000-00-00') {
+                    $dTs = strtotime($item['next_due_date']);
+                    $diff = (int)round(($dTs - $todayTs) / 86400);
+
+                    if ($diff < 0 && $st !== 'paid') {
+                        $globalOverdueCount++;
+                    } elseif ($diff === 0) {
+                        $globalDueTodayCount++;
+                    } elseif ($diff > 0 && $diff <= $warningDays) {
+                        $globalDue7DaysCount++;
+                    }
+
+                    if ($earliestDate === null || $item['next_due_date'] < $earliestDate) {
+                        $earliestDate = $item['next_due_date'];
+                        $minDays = $diff;
+                        if ($diff < 0) {
+                            $earliestCat = 'overdue';
+                        } elseif ($diff === 0) {
+                            $earliestCat = 'today';
+                        } elseif ($diff <= 3) {
+                            $earliestCat = '3days';
+                        } elseif ($diff <= $warningDays) {
+                            $earliestCat = '7days';
+                        } elseif ($diff <= 15) {
+                            $earliestCat = '15days';
+                        } elseif ($diff <= 30) {
+                            $earliestCat = '30days';
+                        } else {
+                            $earliestCat = 'normal';
+                        }
+                    }
+                }
+            }
+
+            $grp['total_recurring'] = $grpRecurring;
+            $grp['earliest_due_date'] = $earliestDate;
+            $grp['earliest_due_days'] = $minDays;
+            $grp['earliest_due_cat'] = $earliestCat;
+
+            $globalTotalDueAmount += (float)$grp['unpaid_inv_due'];
+        }
+        unset($grp);
+
+        // Sort Clients by Earliest Next Due Date ASC
+        uasort($clientGroups, function ($a, $b) {
+            $dateA = !empty($a['earliest_due_date']) && $a['earliest_due_date'] !== '0000-00-00' ? $a['earliest_due_date'] : '9999-12-31';
+            $dateB = !empty($b['earliest_due_date']) && $b['earliest_due_date'] !== '0000-00-00' ? $b['earliest_due_date'] : '9999-12-31';
+            if ($dateA === $dateB) {
+                return strcmp($a['client_name'], $b['client_name']);
+            }
             return strcmp($dateA, $dateB);
         });
 
-        // Compute Statistics
-        $totalClientsCount = count($monitoredUserIds);
-        $totalActiveCount = 0;
-        $dueTodayCount = 0;
-        $due7DaysCount = 0;
-        $overdueCount = 0;
-        $totalDueAmount = 0.00;
-
-        foreach ($unifiedRecords as $r) {
-            $st = strtolower($r['status']);
-            if ($st === 'active') {
-                $totalActiveCount++;
-            }
-            if ($st === 'unpaid') {
-                $totalDueAmount += (float)$r['price'];
-            }
-
-            if (!empty($r['next_due_date']) && $r['next_due_date'] !== '0000-00-00') {
-                $dTs = strtotime($r['next_due_date']);
-                $diff = (int)round(($dTs - $todayTs) / 86400);
-
-                if ($diff < 0 && $st !== 'paid') {
-                    $overdueCount++;
-                    if ($st === 'active') {
-                        $totalDueAmount += (float)$r['price'];
-                    }
-                } elseif ($diff === 0) {
-                    $dueTodayCount++;
-                } elseif ($diff > 0 && $diff <= $warningDays) {
-                    $due7DaysCount++;
-                }
-            }
-        }
-
-        // Compute per-client item counts
-        $clientItemCounts = [];
-        foreach ($unifiedRecords as $r) {
-            $uId = (int)($r['userid'] ?? 0);
-            if ($uId > 0) {
-                $clientItemCounts[$uId] = ($clientItemCounts[$uId] ?? 0) + 1;
-            }
-        }
-
-        // Monitored Clients Chips Bar
+        // Monitored Clients Filter Chips Bar
         $clientChipsHtml = '';
         if (!empty($monitoredClients) && $monitoredClients->count() > 0) {
-            $clientChipsHtml .= '<button type="button" class="btn btn-default btn-xs csm-client-filter-chip active-chip" id="csmChipAll" onclick="csmFilterByClient(\'\')" style="border-radius:20px;font-weight:700;margin:3px 4px 3px 0;background:#12589b;color:#fff;border-color:#12589b;padding:4px 12px;"><i class="fas fa-layer-group"></i> All (' . count($unifiedRecords) . ')</button>';
+            $clientChipsHtml .= '<button type="button" class="btn btn-default btn-xs csm-client-filter-chip active-chip" id="csmChipAll" onclick="csmFilterByClient(\'\')" style="border-radius:20px;font-weight:700;margin:3px 4px 3px 0;background:#12589b;color:#fff;border-color:#12589b;padding:4px 12px;"><i class="fas fa-layer-group"></i> All Clients (' . count($clientGroups) . ')</button>';
             foreach ($monitoredClients as $mc) {
                 $cName = trim($mc->firstname . ' ' . $mc->lastname);
                 $cComp = $mc->companyname ? ' (' . $mc->companyname . ')' : '';
-                $itemCount = $clientItemCounts[$mc->id] ?? 0;
+                $itemCount = isset($clientGroups['client_' . $mc->id]) ? count($clientGroups['client_' . $mc->id]['items']) : 0;
                 $removeUrl = $moduleLink . '&action=remove_monitored_client&userid=' . $mc->id;
-                $clientChipsHtml .= '<span class="csm-client-chip" data-userid="' . $mc->id . '" onclick="csmFilterByClient(' . $mc->id . ')" style="cursor:pointer;display:inline-flex;align-items:center;background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;margin:3px 4px 3px 0;transition:all 0.15s ease;" title="Click to filter services for ' . csm_h($cName) . '">'
+                $clientChipsHtml .= '<span class="csm-client-chip" data-userid="' . $mc->id . '" onclick="csmFilterByClient(' . $mc->id . ')" style="cursor:pointer;display:inline-flex;align-items:center;background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;margin:3px 4px 3px 0;transition:all 0.15s ease;" title="Click to view client ' . csm_h($cName) . '">'
                     . '<i class="fas fa-user-check text-primary" style="margin-right:5px;"></i>'
-                    . '<span class="csm-chip-label">#' . $mc->id . ' ' . csm_h($cName) . csm_h($cComp) . ' <strong style="color:#0f5ea8;">(' . $itemCount . ')</strong></span>'
+                    . '<span class="csm-chip-label">#' . $mc->id . ' ' . csm_h($cName) . csm_h($cComp) . ' <strong style="color:#0f5ea8;">(' . $itemCount . ' Products)</strong></span>'
                     . '<a href="javascript:void(0)" onclick="event.stopPropagation(); openConfigureClientModal(' . $mc->id . ')" style="color:#0284c7;margin-left:6px;font-size:12px;padding:1px 3px;" title="Configure Monitored Services &amp; Scope"><i class="fas fa-sliders"></i></a>'
                     . '<a href="clientssummary.php?userid=' . $mc->id . '" target="_blank" onclick="event.stopPropagation()" style="color:#64748b;margin-left:4px;font-size:11px;" title="View WHMCS Profile"><i class="fas fa-external-link-alt"></i></a>'
                     . '<a href="' . csm_h($removeUrl) . '" onclick="event.stopPropagation(); return csmConfirmDelete(this.href, \'Remove #' . $mc->id . ' ' . csm_h(addslashes($cName)) . ' from Custom Monitor?\')" style="color:#dc2626;margin-left:8px;font-weight:900;text-decoration:none;font-size:14px;" title="Remove from Monitor">&times;</a>'
@@ -1213,42 +1345,42 @@ if (!function_exists('csm_render_custom_customers_page')) {
             $clientChipsHtml = '<span class="text-muted" style="font-size:12.5px;"><i class="fas fa-info-circle"></i> No specific clients added yet. Click <strong>"Add Clients to Monitor"</strong> to select your high-value / VIP clients.</span>';
         }
 
-        // Client Filter Options
-        $clientFilterOptions = '<option value="">All Monitored Clients (' . (!empty($monitoredClients) ? $monitoredClients->count() : 0) . ')</option>';
-        if (!empty($monitoredClients)) {
-            foreach ($monitoredClients as $mc) {
-                $cName = trim($mc->firstname . ' ' . $mc->lastname);
-                $cComp = $mc->companyname ? ' (' . $mc->companyname . ')' : '';
-                $itemCount = $clientItemCounts[$mc->id] ?? 0;
-                $clientFilterOptions .= '<option value="' . $mc->id . '">#' . $mc->id . ' - ' . csm_h($cName) . csm_h($cComp) . ' (' . $itemCount . ')</option>';
+        // Client Dropdown Options for Filter
+        $clientFilterOptions = '<option value="">All Monitored Clients (' . count($clientGroups) . ')</option>';
+        if (!empty($clientGroups)) {
+            foreach ($clientGroups as $cg) {
+                $cId = $cg['userid'] > 0 ? '#' . $cg['userid'] : '#Offline-' . str_replace('offline_', '', $cg['group_key']);
+                $cComp = $cg['company'] ? ' (' . $cg['company'] . ')' : '';
+                $itemCount = count($cg['items']);
+                $clientFilterOptions .= '<option value="' . $cg['group_key'] . '">' . $cId . ' - ' . csm_h($cg['client_name']) . csm_h($cComp) . ' (' . $itemCount . ')</option>';
             }
         }
 
         // 6 Summary Stats Cards
         $html .= '<div class="csm-stats" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
-            <div class="csm-stat" onclick="csmFilterCustom(\'\')" title="Show All Records">
+            <div class="csm-stat" onclick="csmFilterCustom(\'\')" title="Show All Monitored Clients">
                 <div class="csm-stat-label">Monitored Clients</div>
                 <div class="csm-stat-value">' . $totalClientsCount . '</div>
             </div>
             <div class="csm-stat" onclick="csmFilterCustom(\'active\')" title="Show Active Services">
                 <div class="csm-stat-label">Active Services</div>
-                <div class="csm-stat-value" style="color:#16a34a;">' . $totalActiveCount . '</div>
+                <div class="csm-stat-value" style="color:#16a34a;">' . $totalActiveServicesCount . '</div>
             </div>
             <div class="csm-stat" onclick="csmFilterCustom(\'due7days\')" title="Show Due in ' . $warningDays . ' Days">
                 <div class="csm-stat-label">Due in ' . $warningDays . ' Days</div>
-                <div class="csm-stat-value" style="color:#f59e0b;">' . $due7DaysCount . '</div>
+                <div class="csm-stat-value" style="color:#f59e0b;">' . $globalDue7DaysCount . '</div>
             </div>
             <div class="csm-stat" onclick="csmFilterCustom(\'today\')" title="Show Due Today">
                 <div class="csm-stat-label">Due Today</div>
-                <div class="csm-stat-value" style="color:#ea580c;">' . $dueTodayCount . '</div>
+                <div class="csm-stat-value" style="color:#ea580c;">' . $globalDueTodayCount . '</div>
             </div>
-            <div class="csm-stat" onclick="csmFilterCustom(\'overdue\')" title="Show Overdue">
-                <div class="csm-stat-label">Overdue</div>
-                <div class="csm-stat-value" style="color:#dc2626;">' . $overdueCount . '</div>
+            <div class="csm-stat" onclick="csmFilterCustom(\'overdue\')" title="Show Overdue Services">
+                <div class="csm-stat-label">Overdue Services</div>
+                <div class="csm-stat-value" style="color:#dc2626;">' . $globalOverdueCount . '</div>
             </div>
-            <div class="csm-stat" onclick="csmFilterCustom(\'unpaid\')" title="Show Total Unpaid Dues">
+            <div class="csm-stat" onclick="csmFilterCustom(\'unpaid\')" title="Show Total Unpaid Invoices Due">
                 <div class="csm-stat-label">Total Unpaid Due</div>
-                <div class="csm-stat-value" style="color:#dc2626;font-size:18px;">' . $currPrefix . number_format((float)$totalDueAmount, 2) . $currSuffix . '</div>
+                <div class="csm-stat-value" style="color:#dc2626;font-size:18px;">' . $currPrefix . number_format((float)$globalTotalDueAmount, 2) . $currSuffix . '</div>
             </div>
         </div>';
 
@@ -1257,9 +1389,9 @@ if (!function_exists('csm_render_custom_customers_page')) {
             <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;border-bottom:1px solid #eef3f8;">
                 <div>
                     <h4 style="margin:0;font-weight:800;color:#1e293b;font-size:16px;">
-                        <i class="fas fa-users-gear text-primary"></i> Monitored VIP / Selected Clients
+                        <i class="fas fa-users-gear text-primary"></i> Monitored VIP Clients &amp; Ledgers
                     </h4>
-                    <div class="csm-muted">Real-time dedicated monitoring of services, domains, dues, and payment ledgers for your selected clients.</div>
+                    <div class="csm-muted">Client-centric live monitoring. Expand any client row to view individual products, domains, server details, due dates &amp; payment ledgers.</div>
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <button class="btn btn-primary btn-sm" onclick="openManageMonitoredClientsModal()"><i class="fas fa-user-plus"></i> Add Clients to Monitor</button>
@@ -1272,16 +1404,25 @@ if (!function_exists('csm_render_custom_customers_page')) {
             </div>
         </div>';
 
-        // Real-Time Search & Filtering Panel (Identical Layout to Live Monitor)
+        // Real-Time Search & Filtering Panel
         $html .= '<div class="panel panel-default csm-filter-panel" style="border-radius:8px;border:1px solid #dce6f2;margin-bottom:20px;background:#ffffff;box-shadow:0 10px 24px rgba(15,23,42,0.06);overflow:hidden;">
             <div class="panel-heading" style="background:#f8fafc;padding:12px 18px;border-bottom:1px solid #e2e8f0;">
-                <h3 class="panel-title" style="font-weight:700;font-size:14px;margin:0;color:#1e293b;"><i class="fa-solid fa-filter text-primary"></i> Real-Time Search &amp; Filtering</h3>
+                <h3 class="panel-title" style="font-weight:700;font-size:14px;margin:0;color:#1e293b;"><i class="fa-solid fa-filter text-primary"></i> Real-Time Search &amp; Client Filters</h3>
             </div>
             <div class="panel-body" style="padding:18px;">
                 <form id="customFilterForm" onsubmit="return false;">
                     <div class="row">
                         <!-- Left Column -->
                         <div class="col-md-6 col-sm-12">
+                            <div class="form-group row" style="margin-bottom:12px;display:flex;align-items:center;">
+                                <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Monitored Client</label>
+                                <div class="col-sm-8">
+                                    <select id="filterCustomClient" class="form-control">
+                                        ' . $clientFilterOptions . '
+                                    </select>
+                                </div>
+                            </div>
+
                             <div class="form-group row" style="margin-bottom:12px;display:flex;align-items:center;">
                                 <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Product Type</label>
                                 <div class="col-sm-8">
@@ -1292,7 +1433,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                                         <option value="reselleraccount">Reseller Hosting</option>
                                         <option value="other">Other Product/Service</option>
                                         <option value="domain">Domain Names</option>
-                                        <option value="custom_customer">Offline / Custom Services</option>
+                                        <option value="custom">Offline / Custom Services</option>
                                     </select>
                                 </div>
                             </div>
@@ -1313,7 +1454,10 @@ if (!function_exists('csm_render_custom_customers_page')) {
                                     </select>
                                 </div>
                             </div>
+                        </div>
 
+                        <!-- Right Column -->
+                        <div class="col-md-6 col-sm-12">
                             <div class="form-group row" style="margin-bottom:12px;display:flex;align-items:center;">
                                 <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Next Due Filter</label>
                                 <div class="col-sm-8">
@@ -1330,18 +1474,6 @@ if (!function_exists('csm_render_custom_customers_page')) {
                             </div>
 
                             <div class="form-group row" style="margin-bottom:12px;display:flex;align-items:center;">
-                                <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Monitored Client</label>
-                                <div class="col-sm-8">
-                                    <select id="filterCustomClient" class="form-control">
-                                        ' . $clientFilterOptions . '
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Right Column -->
-                        <div class="col-md-6 col-sm-12">
-                            <div class="form-group row" style="margin-bottom:12px;display:flex;align-items:center;">
                                 <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Server</label>
                                 <div class="col-sm-8">
                                     <select id="filterCustomServer" class="form-control">
@@ -1351,26 +1483,10 @@ if (!function_exists('csm_render_custom_customers_page')) {
                             </div>
 
                             <div class="form-group row" style="margin-bottom:12px;display:flex;align-items:center;">
-                                <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Status</label>
-                                <div class="col-sm-8">
-                                    <select id="filterCustomStatus" class="form-control">
-                                        <option value="">Any Status</option>
-                                        <option value="active">Active (Default)</option>
-                                        <option value="unpaid">Unpaid</option>
-                                        <option value="suspended">Suspended</option>
-                                        <option value="paid">Paid</option>
-                                        <option value="pending">Pending</option>
-                                        <option value="terminated">Terminated</option>
-                                        <option value="cancelled">Cancelled</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div class="form-group row" style="margin-bottom:12px;display:flex;align-items:center;">
                                 <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Live Search</label>
                                 <div class="col-sm-8">
                                     <div class="input-group" style="width:100%;">
-                                        <input type="text" id="filterCustomSearch" class="form-control" placeholder="Search Client, Phone, Domain, IP, ID...">
+                                        <input type="text" id="filterCustomSearch" class="form-control" placeholder="Search Client, Company, Phone, Domain, Server, Service...">
                                         <span class="input-group-btn">
                                             <button class="btn btn-default" type="button" id="filterCustomSearchClear" title="Clear Search"><i class="fas fa-times"></i></button>
                                         </span>
@@ -1388,49 +1504,54 @@ if (!function_exists('csm_render_custom_customers_page')) {
             </div>
         </div>';
 
-        // Main Services Table Card
+        // Main Client-Centric Table Card
         $html .= '<div class="csm-table-card">
             <div class="csm-table-header" style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                 <div>
                     <h3 style="margin:0;font-size:18px;font-weight:800;color:#1e293b;">
-                        <i class="fas fa-desktop text-primary"></i> Monitored Clients Live Service Board
+                        <i class="fas fa-users-viewfinder text-primary"></i> Monitored Clients &amp; Services Overview
                     </h3>
-                    <div class="csm-muted">Showing all services, domains &amp; custom dues for the selected clients, sorted by next due date.</div>
+                    <div class="csm-muted">Click <strong>"View Products"</strong> on any client row to view and manage their individual hosting, VPS, domains and custom dues.</div>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <button type="button" class="btn btn-default btn-sm" onclick="csmExpandAllClients()" style="font-weight:700;"><i class="fas fa-folder-open text-primary"></i> Expand All</button>
+                    <button type="button" class="btn btn-default btn-sm" onclick="csmCollapseAllClients()" style="font-weight:700;"><i class="fas fa-folder text-muted"></i> Collapse All</button>
                 </div>
             </div>
             <div style="overflow-x:auto;">
                 <table class="csm-table" id="csmCustomMonitorTable">
                     <thead>
                         <tr>
-                            <th width="65">ID</th>
-                            <th>Product / Service</th>
-                            <th>Domain</th>
+                            <th width="75">Client ID</th>
                             <th>Client &amp; Contact</th>
                             <th>Phone / WhatsApp</th>
-                            <th>Billing</th>
-                            <th>Next Due Date <i class="fas fa-arrow-down-short-wide text-primary"></i></th>
-                            <th>Grace Suspend</th>
-                            <th>Due Note / Remarks</th>
-                            <th>Status</th>
-                            <th width="90" class="text-center">Action</th>
+                            <th class="text-center" width="110">Products</th>
+                            <th>Total Recurring</th>
+                            <th>Total Unpaid Due</th>
+                            <th>Earliest Next Due</th>
+                            <th class="text-center" width="85">Status</th>
+                            <th class="text-center" width="220">Action</th>
                         </tr>
                     </thead>
                     <tbody id="csmCustomMonitorTableBody">';
 
-        if (empty($unifiedRecords)) {
-            $html .= '<tr id="csmCustomEmptyRow"><td colspan="11" style="text-align:center;padding:50px;color:#64748b;">
+        if (empty($clientGroups)) {
+            $html .= '<tr id="csmCustomEmptyRow"><td colspan="9" style="text-align:center;padding:50px;color:#64748b;">
                 <i class="fas fa-users-gear" style="font-size:38px;margin-bottom:12px;display:block;opacity:0.4;"></i>
-                <p style="font-size:15px;font-weight:700;color:#334155;margin-bottom:6px;">No services to display</p>
+                <p style="font-size:15px;font-weight:700;color:#334155;margin-bottom:6px;">No monitored clients to display</p>
                 <p style="margin-bottom:14px;">Click <strong>"Add Clients to Monitor"</strong> above to select the specific WHMCS clients you want to track.</p>
                 <button class="btn btn-primary" onclick="openManageMonitoredClientsModal()"><i class="fas fa-user-plus"></i> Select Clients Now</button>
             </td></tr>';
         } else {
-            foreach ($unifiedRecords as $idx => $r) {
-                $statusLower = strtolower($r['status']);
-                $statusClass = $statusLower === 'active' ? 'active' : ($statusLower === 'suspended' ? 'suspended' : ($statusLower === 'unpaid' ? 'overdue' : 'warning'));
+            foreach ($clientGroups as $key => $grp) {
+                $isWhmcs = $grp['is_whmcs'];
+                $userId = $grp['userid'];
+                $clientStatusLower = strtolower($grp['client_status']);
+                $clientStatusClass = $clientStatusLower === 'active' ? 'active' : ($clientStatusLower === 'closed' ? 'suspended' : 'warning');
+                $itemsCount = count($grp['items']);
 
                 // Phone cleaning & action buttons (no dots)
-                $rawPhone = trim($r['phone'] ?: '');
+                $rawPhone = trim($grp['phone'] ?: '');
                 $cleanDisplayPhone = str_replace('.', ' ', $rawPhone);
                 $cleanDisplayPhone = trim(preg_replace('/\s+/', ' ', $cleanDisplayPhone));
                 $digitsPhone = preg_replace('/[^0-9]/', '', str_replace('.', '', $rawPhone));
@@ -1447,10 +1568,14 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 }
                 $dialPhone = !empty($intlPhone) ? '+' . $intlPhone : (!empty($digitsPhone) ? '+' . $digitsPhone : '');
 
+                // WhatsApp template for Client Summary
                 $waTemplate = csm_get_setting('wa_template', '');
+                $firstItemName = !empty($grp['items']) ? $grp['items'][0]['product_name'] : 'Services';
+                $firstItemDomain = !empty($grp['items']) ? ($grp['items'][0]['domain'] ?: 'N/A') : 'N/A';
+                $earliestDueFmt = (!empty($grp['earliest_due_date']) && $grp['earliest_due_date'] !== '0000-00-00') ? date('d/m/Y', strtotime($grp['earliest_due_date'])) : 'N/A';
                 $waMessage = str_replace(
                     ['{client_name}', '{service_name}', '{domain}', '{due_date}', '{amount}'],
-                    [$r['client_name'], $r['product_name'], $r['domain'] ?: 'N/A', (!empty($r['next_due_date']) && $r['next_due_date'] !== '0000-00-00') ? date('d/m/Y', strtotime($r['next_due_date'])) : 'N/A', $currPrefix . number_format((float)$r['price'], 2) . $currSuffix],
+                    [$grp['client_name'], $firstItemName . ' (' . $itemsCount . ' Items)', $firstItemDomain, $earliestDueFmt, $currPrefix . number_format((float)$grp['unpaid_inv_due'], 2) . $currSuffix],
                     $waTemplate
                 );
                 $waUrl = !empty($intlPhone) ? 'https://wa.me/' . $intlPhone . '?text=' . urlencode($waMessage) : '';
@@ -1459,118 +1584,275 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 $waBtn = !empty($waUrl) ? '<a href="' . csm_h($waUrl) . '" target="_blank" class="btn btn-success btn-xs" title="WhatsApp Reminder"><i class="fab fa-whatsapp"></i></a>' : '';
                 $copyBtn = !empty($cleanDisplayPhone) ? '<button type="button" class="btn btn-default btn-xs" onclick="csmCopyText(\'' . csm_h(addslashes($cleanDisplayPhone)) . '\')" title="Copy Phone"><i class="far fa-copy"></i></button>' : '';
 
+                // Client info column
                 $clientLink = '';
-                if (!empty($r['userid'])) {
-                    $clientLink = '<a href="clientssummary.php?userid=' . (int)$r['userid'] . '" target="_blank" style="font-weight:700;color:#0f5ea8;">' . csm_h($r['client_name']) . '</a> <a href="clientssummary.php?userid=' . (int)$r['userid'] . '" target="_blank" class="btn btn-default btn-xs" style="margin-left:4px;padding:1px 6px;font-size:10px;" title="WHMCS Client Profile"><i class="fas fa-user-check text-primary"></i> #' . (int)$r['userid'] . '</a>';
+                if ($isWhmcs && $userId > 0) {
+                    $clientLink = '<a href="clientssummary.php?userid=' . $userId . '" target="_blank" style="font-weight:800;color:#0f5ea8;font-size:13.5px;"><i class="fas fa-user-circle"></i> ' . csm_h($grp['client_name']) . '</a>';
                 } else {
-                    $clientLink = '<strong style="color:#1e293b;">' . csm_h($r['client_name']) . '</strong> <span class="label label-default" style="font-size:10px;">Offline</span>';
+                    $clientLink = '<strong style="color:#1e293b;font-size:13.5px;"><i class="fas fa-user-tag"></i> ' . csm_h($grp['client_name']) . '</strong> <span class="label label-default" style="font-size:10px;">Offline</span>';
                 }
 
-                // Due date countdown
-                $dueBadge = '';
-                $dueCategory = 'normal';
-                if (!empty($r['next_due_date']) && $r['next_due_date'] !== '0000-00-00') {
-                    $dTs = strtotime($r['next_due_date']);
-                    $diff = (int)round(($dTs - $todayTs) / 86400);
+                // Total Unpaid Invoices Due display
+                $dueDisplayHtml = '';
+                if ($grp['unpaid_inv_due'] > 0) {
+                    $dueDisplayHtml = '<strong style="color:#dc2626;font-size:14px;"><i class="fas fa-circle-exclamation text-danger"></i> ' . $currPrefix . number_format((float)$grp['unpaid_inv_due'], 2) . $currSuffix . '</strong>' .
+                        '<br><small class="text-danger" style="font-weight:700;">' . (int)$grp['unpaid_inv_count'] . ' Unpaid Invoice' . ($grp['unpaid_inv_count'] > 1 ? 's' : '') . '</small>';
+                } else {
+                    $dueDisplayHtml = '<span style="color:#16a34a;font-weight:700;"><i class="fas fa-check-circle"></i> ' . $currPrefix . '0.00' . $currSuffix . '</span>' .
+                        '<br><small class="text-muted">All Invoices Paid</small>';
+                }
 
+                // Earliest Due Date countdown badge
+                $earliestBadge = '';
+                if (!empty($grp['earliest_due_date']) && $grp['earliest_due_date'] !== '0000-00-00') {
+                    $diff = $grp['earliest_due_days'];
                     if ($diff < 0) {
-                        $dueCategory = 'overdue';
-                        $dueBadge = '<span class="csm-badge csm-badge-overdue">' . abs($diff) . 'd Overdue</span>';
+                        $earliestBadge = '<span class="csm-badge csm-badge-overdue">' . abs($diff) . 'd Overdue</span>';
                     } elseif ($diff === 0) {
-                        $dueCategory = 'today';
-                        $dueBadge = '<span class="csm-badge csm-badge-warning">Due Today</span>';
+                        $earliestBadge = '<span class="csm-badge csm-badge-warning">Due Today</span>';
                     } elseif ($diff <= $warningDays) {
-                        $dueCategory = 'due7days';
-                        $dueBadge = '<span class="csm-badge csm-badge-warning">' . $diff . 'd Left</span>';
+                        $earliestBadge = '<span class="csm-badge csm-badge-warning">' . $diff . 'd Left</span>';
                     } else {
-                        $dueBadge = '<small class="text-muted">' . $diff . 'd left</small>';
+                        $earliestBadge = '<small class="text-muted">' . $diff . 'd left</small>';
                     }
                 }
 
-                // Grace override
-                $overrideKey = $r['record_type'] === 'service' ? $r['id'] : 0;
-                $override = $overrideKey && isset($overrides[$overrideKey]) ? $overrides[$overrideKey] : null;
-                $graceHtml = '';
-                if ($override) {
-                    $graceHtml = '<span class="label label-primary" style="font-size:11px;" title="' . csm_h($override->reason ?: 'Extension granted') . '"><i class="fas fa-clock"></i> ' . date('d/m/Y', strtotime($override->grace_suspend_date)) . '</span> ' .
-                        '<button class="btn btn-default btn-xs" onclick="openLiveGraceModal(' . $r['id'] . ', \'' . csm_h(addslashes($r['product_name'] . ' - ' . ($r['domain'] ?: $r['client_name']))) . '\', \'' . ($r['next_due_date'] ? date('d/m/Y', strtotime($r['next_due_date'])) : 'N/A') . '\')" title="Edit Deadline"><i class="fas fa-edit"></i></button>';
-                } elseif ($r['record_type'] === 'service') {
-                    $graceHtml = '<button class="btn btn-default btn-xs" onclick="openLiveGraceModal(' . $r['id'] . ', \'' . csm_h(addslashes($r['product_name'] . ' - ' . ($r['domain'] ?: $r['client_name']))) . '\', \'' . ($r['next_due_date'] ? date('d/m/Y', strtotime($r['next_due_date'])) : 'N/A') . '\')" title="Set Custom Grace Suspend Date"><i class="fas fa-plus"></i> Grace</button>';
-                } else {
-                    $graceHtml = '<span class="text-muted">—</span>';
+                // Client Row Action Shortcuts
+                $whmcsSummaryBtn = ($isWhmcs && $userId > 0) ? '<a href="clientssummary.php?userid=' . $userId . '" target="_blank" class="btn btn-default btn-sm" title="View WHMCS Client Profile"><i class="fas fa-user-check text-primary"></i></a> ' : '';
+                $loginClientBtn = ($isWhmcs && $userId > 0) ? '<a href="dologin.php?userid=' . $userId . '" target="_blank" class="btn btn-default btn-sm" title="Login as Client in Client Area"><i class="fas fa-right-to-bracket text-info"></i></a> ' : '';
+                $configureScopeBtn = ($isWhmcs && $userId > 0) ? '<button type="button" class="btn btn-default btn-sm" onclick="openConfigureClientModal(' . $userId . ')" title="Configure Monitored Services &amp; Scope"><i class="fas fa-sliders text-warning"></i></button> ' : '';
+                $removeClientBtn = '';
+                if ($isWhmcs && $userId > 0) {
+                    $removeUrl = $moduleLink . '&action=remove_monitored_client&userid=' . $userId;
+                    $removeClientBtn = '<a href="' . csm_h($removeUrl) . '" class="btn btn-default btn-sm" onclick="return csmConfirmDelete(this.href, \'Remove #' . $userId . ' ' . csm_h(addslashes($grp['client_name'])) . ' from Custom Monitor?\')" title="Remove from Monitor"><i class="fas fa-trash-can text-danger"></i></a>';
                 }
 
-                // Notes
-                $noteKey = $r['record_type'] . '_' . $r['id'];
-                $itemNotes = isset($notes[$noteKey]) ? $notes[$noteKey] : null;
-                $latestNote = $itemNotes ? $itemNotes->first() : null;
-                $notePreview = $latestNote ? '<span class="label label-info" style="font-size:11px;" title="' . csm_h($latestNote->note) . '"><i class="fas fa-note-sticky"></i> ' . csm_h(substr($latestNote->note, 0, 16)) . '...</span>' : '<span style="color:#94a3b8;font-size:11px;">No note</span>';
-                $noteBtn = '<button class="btn btn-default btn-xs" onclick="openNoteModal(\'' . $r['record_type'] . '\', ' . $r['id'] . ', \'' . csm_h(addslashes($r['product_name'] . ' (#' . $r['id'] . ')')) . '\', ' . (float)$r['price'] . ')" title="Add / View Note"><i class="fas fa-edit"></i></button>';
+                // Compile Search Corpus for Client Master Row (Includes child item names, domains, IPs, servers & notes)
+                $childSearchTerms = [];
+                $childProductTypes = [];
+                $childBillingCycles = [];
+                $childServerIds = [];
+                $childStatuses = [];
 
-                // Domain
-                $domainHtml = $r['domain'] ? '<a href="http://' . csm_h($r['domain']) . '" target="_blank" style="color:#1d4ed8;font-weight:600;"><i class="fas fa-globe"></i> ' . csm_h($r['domain']) . '</a>' : '<span class="text-muted">—</span>';
+                foreach ($grp['items'] as $it) {
+                    $childSearchTerms[] = $it['id'] . ' ' . $it['product_name'] . ' ' . $it['domain'] . ' ' . ($it['server_name'] ?? '');
+                    $childProductTypes[] = strtolower($it['product_type'] ?: $it['record_type']);
+                    $childBillingCycles[] = strtolower($it['billing_cycle'] ?: '');
+                    if (!empty($it['server_id'])) {
+                        $childServerIds[] = (string)$it['server_id'];
+                    }
+                    $childStatuses[] = strtolower($it['status']);
 
-                // Manage Links
-                $whmcsServiceLink = '';
-                if ($r['record_type'] === 'service') {
-                    $whmcsServiceLink = '<a href="clientsservices.php?id=' . $r['id'] . '" target="_blank" class="btn btn-default btn-xs" title="Manage Service in WHMCS"><i class="fas fa-external-link-alt"></i></a> ';
-                } elseif ($r['record_type'] === 'domain') {
-                    $whmcsServiceLink = '<a href="clientsdomains.php?id=' . $r['id'] . '" target="_blank" class="btn btn-default btn-xs" title="Manage Domain in WHMCS"><i class="fas fa-external-link-alt"></i></a> ';
+                    // Include note text
+                    $nKey = $it['record_type'] . '_' . $it['id'];
+                    if (isset($notes[$nKey]) && $notes[$nKey]->first()) {
+                        $childSearchTerms[] = $notes[$nKey]->first()->note;
+                    }
                 }
 
-                $loginClientBtn = !empty($r['userid']) ? '<a href="dologin.php?userid=' . (int)$r['userid'] . '" target="_blank" class="btn btn-default btn-xs" title="Login as Client"><i class="fas fa-right-to-bracket"></i></a> ' : '';
+                $searchCorpus = strtolower($userId . ' ' . $grp['client_name'] . ' ' . $grp['company'] . ' ' . $grp['email'] . ' ' . $cleanDisplayPhone . ' ' . $digitsPhone . ' ' . implode(' ', $childSearchTerms));
+                $productTypesStr = implode(',', array_unique($childProductTypes));
+                $billingCyclesStr = implode(',', array_unique($childBillingCycles));
+                $serverIdsStr = implode(',', array_unique($childServerIds));
+                $statusesStr = implode(',', array_unique($childStatuses));
 
-                $customActionBtns = '';
-                if ($r['is_custom']) {
-                    $customActionBtns = '<button class="btn btn-default btn-xs" onclick=\'editCustomer(' . json_encode($r['raw_cust_obj']) . ')\' title="Edit Custom Service"><i class="fas fa-pen"></i></button> ' .
-                        '<a href="' . csm_h($moduleLink) . '&action=delete_custom_customer&id=' . $r['id'] . '" class="btn btn-danger btn-xs" onclick="return csmConfirmDelete(this.href, \'Delete this custom service record?\')" title="Delete"><i class="fas fa-trash"></i></a>';
-                }
-
-                $dueDays = 99999;
-                if (!empty($r['next_due_date']) && $r['next_due_date'] !== '0000-00-00') {
-                    $dueDays = (int)round((strtotime($r['next_due_date']) - $todayTs) / 86400);
-                }
-
-                $searchCorpus = strtolower($r['id'] . ' ' . $r['client_name'] . ' ' . $r['company'] . ' ' . $r['email'] . ' ' . $cleanDisplayPhone . ' ' . $r['product_name'] . ' ' . $r['domain'] . ' ' . $r['status'] . ' ' . ($latestNote ? $latestNote->note : '') . ' ' . ($r['server_name'] ?? ''));
-
-                $html .= '<tr class="csm-custom-row"'
+                // 1. Render Master Client Row
+                $html .= '<tr class="csm-client-master-row"'
+                    . ' id="csmMasterRow_' . $key . '"'
+                    . ' data-groupkey="' . $key . '"'
+                    . ' data-userid="' . $userId . '"'
                     . ' data-search="' . csm_h($searchCorpus) . '"'
-                    . ' data-userid="' . (int)$r['userid'] . '"'
-                    . ' data-producttype="' . csm_h(strtolower($r['product_type'] ?: $r['record_type'])) . '"'
-                    . ' data-serverid="' . (int)($r['server_id'] ?? 0) . '"'
-                    . ' data-billingcycle="' . csm_h($r['billing_cycle']) . '"'
-                    . ' data-status="' . csm_h($statusLower) . '"'
-                    . ' data-due="' . csm_h($dueCategory) . '"'
-                    . ' data-duedays="' . (int)$dueDays . '">
-                    <td><strong>#' . $r['id'] . '</strong>' . ($r['is_custom'] ? '<br><span class="label label-default" style="font-size:9px;">Custom</span>' : '') . '</td>
-                    <td>
-                        <strong>' . csm_h($r['product_name']) . '</strong>
-                        ' . ($r['server_name'] ? '<br><small class="text-muted"><i class="fas fa-server"></i> ' . csm_h($r['server_name']) . '</small>' : '') . '
+                    . ' data-producttypes="' . csm_h($productTypesStr) . '"'
+                    . ' data-billingcycles="' . csm_h($billingCyclesStr) . '"'
+                    . ' data-serverids="' . csm_h($serverIdsStr) . '"'
+                    . ' data-statuses="' . csm_h($statusesStr) . '"'
+                    . ' data-due="' . csm_h($grp['earliest_due_cat']) . '"'
+                    . ' data-duedays="' . (int)$grp['earliest_due_days'] . '"'
+                    . ' style="cursor:pointer;background:#ffffff;transition:background 0.15s ease;">
+                    <td onclick="csmToggleClientRow(\'' . $key . '\')">
+                        <strong>' . ($isWhmcs ? '#' . $userId : '<span class="label label-default">Offline</span>') . '</strong>
                     </td>
-                    <td>' . $domainHtml . '</td>
-                    <td>
+                    <td onclick="csmToggleClientRow(\'' . $key . '\')">
                         ' . $clientLink . '
-                        ' . ($r['company'] ? '<br><small class="text-muted"><i class="fas fa-building"></i> ' . csm_h($r['company']) . '</small>' : '') . '
-                        ' . ($r['email'] ? '<br><small><a href="mailto:' . csm_h($r['email']) . '" style="color:#64748b;"><i class="fas fa-envelope"></i> ' . csm_h($r['email']) . '</a></small>' : '') . '
+                        ' . ($grp['company'] ? '<br><small class="text-muted"><i class="fas fa-building"></i> ' . csm_h($grp['company']) . '</small>' : '') . '
+                        ' . ($grp['email'] ? '<br><small><a href="mailto:' . csm_h($grp['email']) . '" onclick="event.stopPropagation()" style="color:#64748b;"><i class="fas fa-envelope"></i> ' . csm_h($grp['email']) . '</a></small>' : '') . '
                     </td>
                     <td>
                         <div style="font-size:12px;font-weight:700;color:#1e293b;">' . csm_h($cleanDisplayPhone ?: 'N/A') . '</div>
                         <div style="margin-top:3px;display:flex;gap:4px;">' . $callBtn . ' ' . $waBtn . ' ' . $copyBtn . '</div>
                     </td>
-                    <td><strong>' . $currPrefix . number_format((float)$r['price'], 2) . $currSuffix . '</strong><br><small class="text-muted">' . csm_h($r['billing_cycle']) . '</small></td>
-                    <td>
-                        <strong>' . ((!empty($r['next_due_date']) && $r['next_due_date'] !== '0000-00-00') ? date('d/m/Y', strtotime($r['next_due_date'])) : 'N/A') . '</strong>
-                        ' . ($dueBadge ? '<br>' . $dueBadge : '') . '
+                    <td class="text-center" onclick="csmToggleClientRow(\'' . $key . '\')">
+                        <span class="badge" style="background:#e0f2fe;color:#0369a1;font-size:12px;font-weight:700;padding:4px 9px;">
+                            <i class="fas fa-cubes"></i> ' . $itemsCount . ' Product' . ($itemsCount === 1 ? '' : 's') . '
+                        </span>
                     </td>
-                    <td>' . $graceHtml . '</td>
-                    <td>' . $notePreview . ' ' . $noteBtn . '</td>
-                    <td><span class="csm-badge csm-badge-' . $statusClass . '">' . csm_h($r['status']) . '</span></td>
+                    <td onclick="csmToggleClientRow(\'' . $key . '\')">
+                        <strong>' . $currPrefix . number_format((float)$grp['total_recurring'], 2) . $currSuffix . '</strong>
+                        <br><small class="text-muted">Total Active/Mo</small>
+                    </td>
+                    <td onclick="csmToggleClientRow(\'' . $key . '\')">
+                        ' . $dueDisplayHtml . '
+                    </td>
+                    <td onclick="csmToggleClientRow(\'' . $key . '\')">
+                        <strong>' . $earliestDueFmt . '</strong>
+                        ' . ($earliestBadge ? '<br>' . $earliestBadge : '') . '
+                    </td>
+                    <td class="text-center" onclick="csmToggleClientRow(\'' . $key . '\')">
+                        <span class="csm-badge csm-badge-' . $clientStatusClass . '">' . csm_h($grp['client_status']) . '</span>
+                    </td>
                     <td class="text-center" style="white-space:nowrap;">
-                        ' . $whmcsServiceLink . '
+                        <button type="button" class="btn btn-primary btn-sm csm-toggle-btn" id="btnToggle_' . $key . '" onclick="csmToggleClientRow(\'' . $key . '\')" style="font-weight:700;">
+                            <i class="fas fa-eye"></i> View Products (' . $itemsCount . ')
+                        </button>
+                        ' . $whmcsSummaryBtn . '
                         ' . $loginClientBtn . '
-                        ' . $customActionBtns . '
+                        ' . $configureScopeBtn . '
+                        ' . $removeClientBtn . '
                     </td>
                 </tr>';
+
+                // 2. Render Expandable Child Row (Nested Products & Services Table)
+                $html .= '<tr class="csm-client-child-row" id="csmChildRow_' . $key . '" style="display:none;">
+                    <td colspan="9" style="padding:0;background:#f8fafc;border-top:none;border-bottom:2px solid #cbd5e1;">
+                        <div class="csm-child-wrap" style="padding:16px 20px;background:#f8fafc;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+                                <div>
+                                    <h5 style="margin:0;font-weight:800;color:#0f5ea8;font-size:14px;">
+                                        <i class="fas fa-boxes-stacked"></i> Products &amp; Services for ' . csm_h($grp['client_name']) . ($isWhmcs ? ' (#' . $userId . ')' : '') . '
+                                    </h5>
+                                    <div style="font-size:12px;color:#64748b;margin-top:2px;">
+                                        Showing ' . $itemsCount . ' monitored item' . ($itemsCount === 1 ? '' : 's') . '. Total Unpaid Due: <strong style="color:#dc2626;">' . $currPrefix . number_format((float)$grp['unpaid_inv_due'], 2) . $currSuffix . '</strong> (' . (int)$grp['unpaid_inv_count'] . ' unpaid invoice' . ($grp['unpaid_inv_count'] === 1 ? '' : 's') . ')
+                                    </div>
+                                </div>
+                                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                                    <button type="button" class="btn btn-default btn-xs" onclick="openAddCustomerModalWithClient(' . $userId . ')"><i class="fas fa-plus text-success"></i> Add Custom Service</button>
+                                    ' . ($isWhmcs && $userId > 0 ? '<a href="clientsservices.php?userid=' . $userId . '" target="_blank" class="btn btn-default btn-xs"><i class="fas fa-server text-primary"></i> WHMCS Services</a>' : '') . '
+                                    ' . ($isWhmcs && $userId > 0 ? '<a href="clientsdomains.php?userid=' . $userId . '" target="_blank" class="btn btn-default btn-xs"><i class="fas fa-globe text-info"></i> WHMCS Domains</a>' : '') . '
+                                    ' . ($isWhmcs && $userId > 0 ? '<a href="invoices.php?userid=' . $userId . '" target="_blank" class="btn btn-default btn-xs"><i class="fas fa-file-invoice-dollar text-danger"></i> WHMCS Invoices</a>' : '') . '
+                                </div>
+                            </div>
+
+                            <div style="overflow-x:auto;background:#ffffff;border-radius:8px;border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,0.03);">
+                                <table class="table table-hover csm-subtable" style="margin-bottom:0;font-size:12.5px;">
+                                    <thead>
+                                        <tr style="background:#f1f5f9;color:#334155;font-weight:700;font-size:12px;">
+                                            <th width="70">ID</th>
+                                            <th>Product / Service</th>
+                                            <th>Domain / Hostname</th>
+                                            <th>Billing Amount &amp; Cycle</th>
+                                            <th>Next Due Date</th>
+                                            <th>Grace Suspend</th>
+                                            <th>Due Note / Remarks</th>
+                                            <th class="text-center" width="85">Status</th>
+                                            <th class="text-center" width="90">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>';
+
+                if (empty($grp['items'])) {
+                    $html .= '<tr><td colspan="9" style="text-align:center;padding:24px;color:#64748b;">
+                        <i class="fas fa-info-circle text-primary"></i> No active services or domains currently monitored for this client.
+                        ' . ($isWhmcs && $userId > 0 ? '<button class="btn btn-primary btn-xs" onclick="openConfigureClientModal(' . $userId . ')" style="margin-left:8px;"><i class="fas fa-sliders"></i> Configure Monitor Scope</button>' : '') . '
+                    </td></tr>';
+                } else {
+                    foreach ($grp['items'] as $it) {
+                        $itStatusLower = strtolower($it['status']);
+                        $itStatusClass = $itStatusLower === 'active' ? 'active' : ($itStatusLower === 'suspended' ? 'suspended' : ($itStatusLower === 'unpaid' ? 'overdue' : 'warning'));
+
+                        // Due date countdown for child item
+                        $itDueBadge = '';
+                        $itDueCat = 'normal';
+                        $itDueDays = 999999;
+                        if (!empty($it['next_due_date']) && $it['next_due_date'] !== '0000-00-00') {
+                            $dTs = strtotime($it['next_due_date']);
+                            $itDueDays = (int)round(($dTs - $todayTs) / 86400);
+
+                            if ($itDueDays < 0) {
+                                $itDueCat = 'overdue';
+                                $itDueBadge = '<span class="csm-badge csm-badge-overdue">' . abs($itDueDays) . 'd Overdue</span>';
+                            } elseif ($itDueDays === 0) {
+                                $itDueCat = 'today';
+                                $itDueBadge = '<span class="csm-badge csm-badge-warning">Due Today</span>';
+                            } elseif ($itDueDays <= $warningDays) {
+                                $itDueCat = 'due7days';
+                                $itDueBadge = '<span class="csm-badge csm-badge-warning">' . $itDueDays . 'd Left</span>';
+                            } else {
+                                $itDueBadge = '<small class="text-muted">' . $itDueDays . 'd left</small>';
+                            }
+                        }
+
+                        // Grace override
+                        $overrideKey = $it['record_type'] === 'service' ? $it['id'] : 0;
+                        $override = $overrideKey && isset($overrides[$overrideKey]) ? $overrides[$overrideKey] : null;
+                        $graceHtml = '';
+                        if ($override) {
+                            $graceHtml = '<span class="label label-primary" style="font-size:11px;" title="' . csm_h($override->reason ?: 'Extension granted') . '"><i class="fas fa-clock"></i> ' . date('d/m/Y', strtotime($override->grace_suspend_date)) . '</span> ' .
+                                '<button class="btn btn-default btn-xs" onclick="openLiveGraceModal(' . $it['id'] . ', \'' . csm_h(addslashes($it['product_name'] . ' - ' . ($it['domain'] ?: $grp['client_name']))) . '\', \'' . ($it['next_due_date'] ? date('d/m/Y', strtotime($it['next_due_date'])) : 'N/A') . '\')" title="Edit Deadline"><i class="fas fa-edit"></i></button>';
+                        } elseif ($it['record_type'] === 'service') {
+                            $graceHtml = '<button class="btn btn-default btn-xs" onclick="openLiveGraceModal(' . $it['id'] . ', \'' . csm_h(addslashes($it['product_name'] . ' - ' . ($it['domain'] ?: $grp['client_name']))) . '\', \'' . ($it['next_due_date'] ? date('d/m/Y', strtotime($it['next_due_date'])) : 'N/A') . '\')" title="Set Custom Grace Suspend Date"><i class="fas fa-plus"></i> Grace</button>';
+                        } else {
+                            $graceHtml = '<span class="text-muted">—</span>';
+                        }
+
+                        // Note preview & modal button
+                        $noteKey = $it['record_type'] . '_' . $it['id'];
+                        $itemNotes = isset($notes[$noteKey]) ? $notes[$noteKey] : null;
+                        $latestNote = $itemNotes ? $itemNotes->first() : null;
+                        $notePreview = $latestNote ? '<span class="label label-info" style="font-size:11px;" title="' . csm_h($latestNote->note) . '"><i class="fas fa-note-sticky"></i> ' . csm_h(substr($latestNote->note, 0, 16)) . '...</span>' : '<span style="color:#94a3b8;font-size:11px;">No note</span>';
+                        $noteBtn = '<button class="btn btn-default btn-xs" onclick="openNoteModal(\'' . $it['record_type'] . '\', ' . $it['id'] . ', \'' . csm_h(addslashes($it['product_name'] . ' (#' . $it['id'] . ')')) . '\', ' . (float)$it['price'] . ')" title="Add / View Note"><i class="fas fa-edit"></i></button>';
+
+                        // Domain link
+                        $domainHtml = $it['domain'] ? '<a href="http://' . csm_h($it['domain']) . '" target="_blank" style="color:#1d4ed8;font-weight:600;"><i class="fas fa-globe"></i> ' . csm_h($it['domain']) . '</a>' : '<span class="text-muted">—</span>';
+
+                        // WHMCS / Custom Action buttons
+                        $whmcsItemLink = '';
+                        if ($it['record_type'] === 'service') {
+                            $whmcsItemLink = '<a href="clientsservices.php?id=' . $it['id'] . '" target="_blank" class="btn btn-default btn-xs" title="Manage Service in WHMCS"><i class="fas fa-external-link-alt text-primary"></i></a> ';
+                        } elseif ($it['record_type'] === 'domain') {
+                            $whmcsItemLink = '<a href="clientsdomains.php?id=' . $it['id'] . '" target="_blank" class="btn btn-default btn-xs" title="Manage Domain in WHMCS"><i class="fas fa-external-link-alt text-primary"></i></a> ';
+                        }
+
+                        $customItemActions = '';
+                        if ($it['is_custom']) {
+                            $customItemActions = '<button class="btn btn-default btn-xs" onclick=\'editCustomer(' . json_encode($it['raw_cust_obj']) . ')\' title="Edit Custom Service"><i class="fas fa-pen text-primary"></i></button> ' .
+                                '<a href="' . csm_h($moduleLink) . '&action=delete_custom_customer&id=' . $it['id'] . '" class="btn btn-danger btn-xs" onclick="return csmConfirmDelete(this.href, \'Delete this custom service record?\')" title="Delete"><i class="fas fa-trash"></i></a>';
+                        }
+
+                        $typeBadge = $it['record_type'] === 'service' ? '<span class="label label-primary" style="font-size:9px;">Hosting/VPS</span>' : ($it['record_type'] === 'domain' ? '<span class="label label-info" style="font-size:9px;">Domain</span>' : '<span class="label label-default" style="font-size:9px;">Custom</span>');
+
+                        $childRowSearch = strtolower($it['id'] . ' ' . $it['product_name'] . ' ' . $it['domain'] . ' ' . ($it['server_name'] ?? '') . ' ' . ($latestNote ? $latestNote->note : ''));
+
+                        $html .= '<tr class="csm-child-item-row"'
+                            . ' data-search="' . csm_h($childRowSearch) . '"'
+                            . ' data-producttype="' . csm_h(strtolower($it['product_type'] ?: $it['record_type'])) . '"'
+                            . ' data-serverid="' . (int)($it['server_id'] ?? 0) . '"'
+                            . ' data-billingcycle="' . csm_h($it['billing_cycle']) . '"'
+                            . ' data-status="' . csm_h($itStatusLower) . '"'
+                            . ' data-due="' . csm_h($itDueCat) . '"'
+                            . ' data-duedays="' . (int)$itDueDays . '">
+                            <td><strong>#' . $it['id'] . '</strong><br>' . $typeBadge . '</td>
+                            <td>
+                                <strong style="color:#1e293b;">' . csm_h($it['product_name']) . '</strong>
+                                ' . ($it['server_name'] ? '<br><small class="text-muted"><i class="fas fa-server"></i> ' . csm_h($it['server_name']) . '</small>' : '') . '
+                            </td>
+                            <td>' . $domainHtml . '</td>
+                            <td><strong>' . $currPrefix . number_format((float)$it['price'], 2) . $currSuffix . '</strong><br><small class="text-muted">' . csm_h($it['billing_cycle']) . '</small></td>
+                            <td>
+                                <strong>' . ((!empty($it['next_due_date']) && $it['next_due_date'] !== '0000-00-00') ? date('d/m/Y', strtotime($it['next_due_date'])) : 'N/A') . '</strong>
+                                ' . ($itDueBadge ? '<br>' . $itDueBadge : '') . '
+                            </td>
+                            <td>' . $graceHtml . '</td>
+                            <td>' . $notePreview . ' ' . $noteBtn . '</td>
+                            <td class="text-center"><span class="csm-badge csm-badge-' . $itStatusClass . '">' . csm_h($it['status']) . '</span></td>
+                            <td class="text-center" style="white-space:nowrap;">
+                                ' . $whmcsItemLink . '
+                                ' . $customItemActions . '
+                            </td>
+                        </tr>';
+                    }
+                }
+
+                $html .= '</tbody></table></div></div></td></tr>';
             }
         }
 
@@ -1898,7 +2180,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
             </div>
         </div>';
 
-        // JavaScript for Custom Clients Live Monitor
+        // JavaScript for Client-Centric Custom Monitor
         $html .= '
         <script>
         var CSM_MODULE_LINK = "' . addslashes($moduleLink) . '";
@@ -1999,7 +2281,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 });
             }
 
-            // Real-Time Table Live Search & Filter (8-field Panel)
+            // Real-Time Table Live Search & Filter
             $("#filterCustomSearch").on("input", function() {
                 applyCustomMonitorFilters();
             });
@@ -2009,13 +2291,56 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 applyCustomMonitorFilters();
             });
 
-            $("#filterCustomClient, #filterCustomProductType, #filterCustomBillingCycle, #filterCustomDueStatus, #filterCustomServer, #filterCustomStatus").on("change", function() {
+            $("#filterCustomClient, #filterCustomProductType, #filterCustomBillingCycle, #filterCustomDueStatus, #filterCustomServer").on("change", function() {
                 if ($(this).attr("id") === "filterCustomClient") {
-                    highlightActiveClientChip($(this).val());
+                    var cVal = $(this).val();
+                    var uId = cVal ? cVal.replace("client_", "").replace("offline_", "") : "";
+                    highlightActiveClientChip(uId);
                 }
                 applyCustomMonitorFilters();
             });
         });
+
+        // Expand / Collapse Client Products Toggle
+        window.csmToggleClientRow = function(groupKey) {
+            var $childRow = $("#csmChildRow_" + groupKey);
+            var $btn = $("#btnToggle_" + groupKey);
+            var isVisible = $childRow.is(":visible");
+
+            if (isVisible) {
+                $childRow.hide();
+                $btn.removeClass("btn-default").addClass("btn-primary");
+                var origText = $btn.data("orig-text") || $btn.html().replace("Hide Products", "View Products");
+                $btn.html(origText.indexOf("View Products") > -1 ? origText : origText.replace(/Hide/g, "View"));
+            } else {
+                $childRow.show();
+                $btn.removeClass("btn-primary").addClass("btn-default");
+                var currentHtml = $btn.html();
+                $btn.data("orig-text", currentHtml);
+                $btn.html(currentHtml.replace(/View Products/g, "Hide Products").replace("fa-eye", "fa-eye-slash"));
+            }
+        };
+
+        window.csmExpandAllClients = function() {
+            $(".csm-client-child-row").show();
+            $(".csm-toggle-btn").each(function() {
+                var $btn = $(this);
+                $btn.removeClass("btn-primary").addClass("btn-default");
+                var h = $btn.html();
+                $btn.data("orig-text", h.indexOf("View") > -1 ? h : h.replace("Hide", "View"));
+                $btn.html(h.replace(/View Products/g, "Hide Products").replace("fa-eye", "fa-eye-slash"));
+            });
+        };
+
+        window.csmCollapseAllClients = function() {
+            $(".csm-client-child-row").hide();
+            $(".csm-toggle-btn").each(function() {
+                var $btn = $(this);
+                $btn.removeClass("btn-default").addClass("btn-primary");
+                var origText = $btn.data("orig-text") || $btn.html().replace("Hide Products", "View Products").replace("fa-eye-slash", "fa-eye");
+                $btn.html(origText);
+            });
+        };
 
         function highlightActiveClientChip(userId) {
             $(".csm-client-chip").css("background", "#e0f2fe").css("color", "#0369a1").css("border-color", "#bae6fd");
@@ -2034,9 +2359,18 @@ if (!function_exists('csm_render_custom_customers_page')) {
         }
 
         window.csmFilterByClient = function(userId) {
-            $("#filterCustomClient").val(userId ? String(userId) : "");
+            var groupKey = userId ? "client_" + userId : "";
+            $("#filterCustomClient").val(groupKey);
             highlightActiveClientChip(userId);
             applyCustomMonitorFilters();
+            if (groupKey) {
+                $("#csmChildRow_" + groupKey).show();
+                var $btn = $("#btnToggle_" + groupKey);
+                $btn.removeClass("btn-primary").addClass("btn-default");
+                var currentHtml = $btn.html();
+                $btn.data("orig-text", currentHtml);
+                $btn.html(currentHtml.replace(/View Products/g, "Hide Products").replace("fa-eye", "fa-eye-slash"));
+            }
         };
 
         window.resetCustomMonitorFilters = function() {
@@ -2046,7 +2380,6 @@ if (!function_exists('csm_render_custom_customers_page')) {
             $("#filterCustomBillingCycle").val("Any");
             $("#filterCustomDueStatus").val("");
             $("#filterCustomServer").val("0");
-            $("#filterCustomStatus").val("");
             highlightActiveClientChip("");
             applyCustomMonitorFilters();
         };
@@ -2054,10 +2387,6 @@ if (!function_exists('csm_render_custom_customers_page')) {
         window.csmFilterCustom = function(statusVal) {
             if (statusVal === "due7days" || statusVal === "today" || statusVal === "overdue") {
                 $("#filterCustomDueStatus").val(statusVal === "due7days" ? "7days" : statusVal);
-                $("#filterCustomStatus").val("");
-            } else if (statusVal === "active" || statusVal === "unpaid" || statusVal === "suspended" || statusVal === "paid") {
-                $("#filterCustomDueStatus").val("");
-                $("#filterCustomStatus").val(statusVal);
             } else {
                 resetCustomMonitorFilters();
                 return;
@@ -2072,25 +2401,23 @@ if (!function_exists('csm_render_custom_customers_page')) {
             var cycleFilter = ($("#filterCustomBillingCycle").val() || "").trim();
             var dueFilter = ($("#filterCustomDueStatus").val() || "").toLowerCase().trim();
             var serverFilter = ($("#filterCustomServer").val() || "0").toString().trim();
-            var statusFilter = ($("#filterCustomStatus").val() || "").toLowerCase().trim();
             var visibleCount = 0;
 
-            $(".csm-custom-row").each(function() {
-                var $row = $(this);
-                var rowSearch = $row.data("search") || "";
-                var rowUserid = ($row.data("userid") || "").toString().trim();
-                var rowType = ($row.data("producttype") || "").toString().toLowerCase();
-                var rowCycle = ($row.data("billingcycle") || "").toString().trim();
-                var rowServer = ($row.data("serverid") || "0").toString().trim();
-                var rowStatus = ($row.data("status") || "").toString().toLowerCase();
-                var rowDueDays = parseInt($row.data("duedays"), 10);
+            $(".csm-client-master-row").each(function() {
+                var $masterRow = $(this);
+                var groupKey = $masterRow.data("groupkey");
+                var rowSearch = $masterRow.data("search") || "";
+                var rowProductTypes = ($masterRow.data("producttypes") || "").toString().toLowerCase().split(",");
+                var rowBillingCycles = ($masterRow.data("billingcycles") || "").toString().toLowerCase().split(",");
+                var rowServerIds = ($masterRow.data("serverids") || "").toString().split(",");
+                var rowDueDays = parseInt($masterRow.data("duedays"), 10);
+                var rowDueCat = $masterRow.data("due") || "normal";
 
                 var matchesSearch = !search || rowSearch.indexOf(search) > -1;
-                var matchesClient = !clientFilter || (rowUserid === clientFilter);
-                var matchesType = !typeFilter || (rowType === typeFilter) || (typeFilter === "custom_customer" && rowType === "custom");
-                var matchesCycle = !cycleFilter || cycleFilter === "Any" || (rowCycle.toLowerCase() === cycleFilter.toLowerCase());
-                var matchesServer = (serverFilter === "0" || !serverFilter) || (rowServer === serverFilter);
-                var matchesStatus = !statusFilter || (rowStatus === statusFilter);
+                var matchesClient = !clientFilter || (groupKey === clientFilter);
+                var matchesType = !typeFilter || rowProductTypes.indexOf(typeFilter) > -1;
+                var matchesCycle = !cycleFilter || cycleFilter === "Any" || rowBillingCycles.indexOf(cycleFilter.toLowerCase()) > -1;
+                var matchesServer = (serverFilter === "0" || !serverFilter) || (rowServerIds.indexOf(serverFilter) > -1);
 
                 var matchesDue = true;
                 if (dueFilter) {
@@ -2109,17 +2436,65 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     }
                 }
 
-                if (matchesSearch && matchesClient && matchesType && matchesCycle && matchesServer && matchesStatus && matchesDue) {
-                    $row.show();
+                if (matchesSearch && matchesClient && matchesType && matchesCycle && matchesServer && matchesDue) {
+                    $masterRow.show();
                     visibleCount++;
+
+                    // Filter child rows inside this client subtable
+                    var $childRow = $("#csmChildRow_" + groupKey);
+                    var childVisibleCount = 0;
+
+                    $childRow.find(".csm-child-item-row").each(function() {
+                        var $cItem = $(this);
+                        var cSearch = $cItem.data("search") || "";
+                        var cType = ($cItem.data("producttype") || "").toString().toLowerCase();
+                        var cCycle = ($cItem.data("billingcycle") || "").toString().trim();
+                        var cServer = ($cItem.data("serverid") || "0").toString().trim();
+                        var cDueDays = parseInt($cItem.data("duedays"), 10);
+
+                        var cMatchSearch = !search || cSearch.indexOf(search) > -1 || rowSearch.indexOf(search) > -1;
+                        var cMatchType = !typeFilter || (cType === typeFilter);
+                        var cMatchCycle = !cycleFilter || cycleFilter === "Any" || (cCycle.toLowerCase() === cycleFilter.toLowerCase());
+                        var cMatchServer = (serverFilter === "0" || !serverFilter) || (cServer === serverFilter);
+
+                        var cMatchDue = true;
+                        if (dueFilter) {
+                            if (dueFilter === "today") {
+                                cMatchDue = (cDueDays === 0);
+                            } else if (dueFilter === "3days") {
+                                cMatchDue = (cDueDays >= 0 && cDueDays <= 3);
+                            } else if (dueFilter === "7days") {
+                                cMatchDue = (cDueDays >= 0 && cDueDays <= 7);
+                            } else if (dueFilter === "15days") {
+                                cMatchDue = (cDueDays >= 0 && cDueDays <= 15);
+                            } else if (dueFilter === "30days") {
+                                cMatchDue = (cDueDays >= 0 && cDueDays <= 30);
+                            } else if (dueFilter === "overdue") {
+                                cMatchDue = (cDueDays < 0);
+                            }
+                        }
+
+                        if (cMatchSearch && cMatchType && cMatchCycle && cMatchServer && cMatchDue) {
+                            $cItem.show();
+                            childVisibleCount++;
+                        } else {
+                            $cItem.hide();
+                        }
+                    });
+
+                    // Auto-expand if active search is filtering specific child items
+                    if (search && search.length > 1) {
+                        $childRow.show();
+                    }
                 } else {
-                    $row.hide();
+                    $masterRow.hide();
+                    $("#csmChildRow_" + groupKey).hide();
                 }
             });
 
-            if (visibleCount === 0 && $(".csm-custom-row").length > 0) {
+            if (visibleCount === 0 && $(".csm-client-master-row").length > 0) {
                 if ($("#csmCustomNoMatchRow").length === 0) {
-                    $("#csmCustomMonitorTableBody").append("<tr id=\'csmCustomNoMatchRow\'><td colspan=\'11\' style=\'text-align:center;padding:35px;color:#64748b;font-weight:600;\'><i class=\'fas fa-search\'></i> No services match your filter criteria. <a href=\'javascript:void(0)\' onclick=\'resetCustomMonitorFilters()\' style=\'color:#0284c7;text-decoration:underline;margin-left:6px;\'>Reset Filters</a></td></tr>");
+                    $("#csmCustomMonitorTableBody").append("<tr id=\'csmCustomNoMatchRow\'><td colspan=\'9\' style=\'text-align:center;padding:35px;color:#64748b;font-weight:600;\'><i class=\'fas fa-search\'></i> No monitored clients match your filter criteria. <a href=\'javascript:void(0)\' onclick=\'resetCustomMonitorFilters()\' style=\'color:#0284c7;text-decoration:underline;margin-left:6px;\'>Reset Filters</a></td></tr>");
                 }
                 $("#csmCustomNoMatchRow").show();
             } else {
@@ -2311,6 +2686,15 @@ if (!function_exists('csm_render_custom_customers_page')) {
             document.getElementById("csmCustStatus").value = "Active";
             document.getElementById("csmCustNotes").value = "";
             $("#csmCustomerModal").modal("show");
+        };
+
+        window.openAddCustomerModalWithClient = function(userId) {
+            openAddCustomerModal();
+            if (userId && userId > 0) {
+                if ($.fn.select2) {
+                    $("#csmSingleClientSelect").val(String(userId)).trigger("change");
+                }
+            }
         };
 
         window.editCustomer = function(item) {
