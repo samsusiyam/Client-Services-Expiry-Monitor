@@ -140,6 +140,11 @@ if (!function_exists('csm_ensure_tables')) {
                         $table->string('paid_status', 50)->default('unpaid')->after('last_paid_date');
                     });
                 }
+                if (!Capsule::schema()->hasColumn('mod_csm_monitored_clients', 'monthly_pay_day')) {
+                    Capsule::schema()->table('mod_csm_monitored_clients', function ($table) {
+                        $table->unsignedTinyInteger('monthly_pay_day')->nullable()->after('last_paid_date');
+                    });
+                }
             }
 
             if (Capsule::schema()->hasTable('mod_csm_custom_customers')) {
@@ -150,6 +155,32 @@ if (!function_exists('csm_ensure_tables')) {
                         $table->date('last_paid_date')->nullable()->after('custom_due_note');
                     });
                 }
+                if (!Capsule::schema()->hasColumn('mod_csm_custom_customers', 'monthly_pay_day')) {
+                    Capsule::schema()->table('mod_csm_custom_customers', function ($table) {
+                        $table->unsignedTinyInteger('monthly_pay_day')->nullable()->after('last_paid_date');
+                    });
+                }
+            }
+
+            // 6. Monthly Corporate Client Ledgers Table
+            if (!Capsule::schema()->hasTable('mod_csm_monthly_ledgers')) {
+                Capsule::schema()->create('mod_csm_monthly_ledgers', function ($table) {
+                    $table->increments('id');
+                    $table->string('group_key', 64); // 'client_123', 'offline_45'
+                    $table->string('billing_month', 7); // '2026-09' (YYYY-MM)
+                    $table->decimal('total_recurring', 10, 2)->default(0.00);
+                    $table->decimal('paid_amount', 10, 2)->default(0.00);
+                    $table->decimal('due_amount', 10, 2)->default(0.00);
+                    $table->string('status', 20)->default('unpaid'); // 'paid', 'partial', 'unpaid'
+                    $table->date('pay_date')->nullable();
+                    $table->unsignedTinyInteger('monthly_pay_day')->nullable();
+                    $table->text('notes')->nullable();
+                    $table->unsignedInteger('admin_id')->nullable();
+                    $table->string('admin_name', 100)->nullable();
+                    $table->dateTime('created_at')->nullable();
+                    $table->dateTime('updated_at')->nullable();
+                    $table->unique(['group_key', 'billing_month']);
+                });
             }
 
             return true;
@@ -931,6 +962,29 @@ if (!function_exists('csm_render_custom_customers_page')) {
         $todayStr = date('Y-m-d');
         $todayTs = strtotime($todayStr);
 
+        // Selected Billing Month (defaults to current month YYYY-MM)
+        $selectedMonth = isset($_GET['month']) && preg_match('/^\d{4}-\d{2}$/', $_GET['month']) ? $_GET['month'] : date('Y-m');
+        $selectedMonthTs = strtotime($selectedMonth . '-01');
+        $selectedMonthName = date('F Y', $selectedMonthTs);
+        $isCurrentMonth = ($selectedMonth === date('Y-m'));
+
+        $prevMonth = date('Y-m', strtotime($selectedMonth . '-01 -1 month'));
+        $nextMonth = date('Y-m', strtotime($selectedMonth . '-01 +1 month'));
+
+        // Month selector dropdown options (-12 to +3 months)
+        $monthSelectOptions = '';
+        for ($i = -12; $i <= 3; $i++) {
+            $mVal = date('Y-m', strtotime(date('Y-m-01') . " {$i} month"));
+            $mLabel = date('F Y', strtotime($mVal . '-01')) . ($mVal === date('Y-m') ? ' (Current)' : '');
+            $monthSelectOptions .= '<option value="' . $mVal . '"' . ($mVal === $selectedMonth ? ' selected' : '') . '>' . $mLabel . '</option>';
+        }
+
+        // Fetch Monthly Ledgers for selected month
+        $monthlyLedgers = Capsule::table('mod_csm_monthly_ledgers')
+            ->where('billing_month', $selectedMonth)
+            ->get()
+            ->keyBy('group_key');
+
         // Fetch all WHMCS clients for Select2 picker
         $allClients = [];
         try {
@@ -1290,13 +1344,18 @@ if (!function_exists('csm_render_custom_customers_page')) {
             }
         }
 
-        // 5. Compute Client Metrics, Earliest Due Date & Sort Items per Client
+        // 5. Compute Client Metrics & Resolve Monthly Ledger for Selected Month
         $totalClientsCount = count($clientGroups);
         $totalActiveServicesCount = 0;
         $globalDueTodayCount = 0;
         $globalDue7DaysCount = 0;
         $globalOverdueCount = 0;
         $globalTotalCustomDue = 0.00;
+        $globalMonthTotalRecurring = 0.00;
+        $globalMonthTotalPaid = 0.00;
+        $globalMonthTotalDue = 0.00;
+        $globalMonthPaidCount = 0;
+        $globalMonthUnpaidCount = 0;
 
         foreach ($clientGroups as $k => &$grp) {
             $grpRecurring = 0.00;
@@ -1357,37 +1416,72 @@ if (!function_exists('csm_render_custom_customers_page')) {
             $grp['earliest_due_days'] = $minDays;
             $grp['earliest_due_cat'] = $earliestCat;
 
-            $globalTotalCustomDue += (float)$grp['custom_due_amount'];
+            // Resolve Monthly Ledger for Selected Month
+            $key = $grp['group_key'];
+            if (isset($monthlyLedgers[$key])) {
+                $mLedger = $monthlyLedgers[$key];
+                $grp['month_recurring'] = (float)$mLedger->total_recurring;
+                $grp['month_paid'] = (float)$mLedger->paid_amount;
+                $grp['month_due'] = (float)$mLedger->due_amount;
+                $grp['month_status'] = strtolower($mLedger->status ?: ($grp['month_due'] > 0 ? 'unpaid' : 'paid'));
+                $grp['month_pay_date'] = $mLedger->pay_date ?: '';
+                $grp['month_pay_day'] = !empty($mLedger->monthly_pay_day) ? (int)$mLedger->monthly_pay_day : ($grp['monthly_pay_day'] ?? null);
+                $grp['month_notes'] = $mLedger->notes ?: '';
+            } else {
+                // Default month values
+                $grp['month_recurring'] = $grp['total_recurring'];
+                if ($isCurrentMonth) {
+                    $hasLegacyDue = ((float)$grp['custom_due_amount'] > 0);
+                    $grp['month_due'] = $hasLegacyDue ? (float)$grp['custom_due_amount'] : (float)$grp['total_recurring'];
+                    $grp['month_paid'] = ($grp['paid_status'] === 'paid' && !$hasLegacyDue) ? (float)$grp['total_recurring'] : 0.00;
+                    $grp['month_status'] = ($grp['month_paid'] >= $grp['month_recurring'] && $grp['month_recurring'] > 0) ? 'paid' : ($grp['month_due'] > 0 ? 'unpaid' : 'paid');
+                    $grp['month_pay_date'] = $grp['last_paid_date'] ?: (!empty($grp['monthly_pay_day']) ? ($selectedMonth . '-' . str_pad($grp['monthly_pay_day'], 2, '0', STR_PAD_LEFT)) : '');
+                    $grp['month_pay_day'] = $grp['monthly_pay_day'] ?? null;
+                    $grp['month_notes'] = $grp['custom_due_note'] ?: '';
+                } else {
+                    $grp['month_paid'] = 0.00;
+                    $grp['month_due'] = (float)$grp['total_recurring'];
+                    $grp['month_status'] = ($grp['month_due'] > 0 ? 'unpaid' : 'paid');
+                    $grp['month_pay_date'] = !empty($grp['monthly_pay_day']) ? ($selectedMonth . '-' . str_pad($grp['monthly_pay_day'], 2, '0', STR_PAD_LEFT)) : '';
+                    $grp['month_pay_day'] = $grp['monthly_pay_day'] ?? null;
+                    $grp['month_notes'] = '';
+                }
+            }
+
+            $globalTotalCustomDue += (float)$grp['month_due'];
+            $globalMonthTotalPaid += (float)$grp['month_paid'];
+            $globalMonthTotalRecurring += (float)$grp['month_recurring'];
+            if ($grp['month_status'] === 'paid') {
+                $globalMonthPaidCount++;
+            } else {
+                $globalMonthUnpaidCount++;
+            }
         }
         unset($grp);
 
-        // Sort Corporate Clients:
-        // 1. Unpaid Clients (due > 0 or paid_status != 'paid') at the Top
-        //    - Within Unpaid: Sorted by Bill Pay Date ASC (overdue/earliest dates first; no-date at end of unpaid list), then Due Amount DESC
-        // 2. Paid Clients (due == 0 and paid_status == 'paid') at the Bottom
-        //    - Within Paid: Sorted by Bill Pay Date DESC (most recent paid first)
+        // Sort Corporate Clients for the Selected Month:
+        // 1. Unpaid/Partial Clients (month_status != 'paid' or month_due > 0) at Top
+        //    - Sorted by Bill Pay Date ASC (earliest dates first; no-date at end), then Due Amount DESC
+        // 2. Paid Clients at Bottom (Sorted by Bill Pay Date DESC)
         uasort($clientGroups, function ($a, $b) {
-            $isUnpaidA = ((float)$a['custom_due_amount'] > 0 || strtolower($a['paid_status'] ?? '') !== 'paid') ? 1 : 0;
-            $isUnpaidB = ((float)$b['custom_due_amount'] > 0 || strtolower($b['paid_status'] ?? '') !== 'paid') ? 1 : 0;
+            $isUnpaidA = ($a['month_status'] !== 'paid' || (float)$a['month_due'] > 0) ? 1 : 0;
+            $isUnpaidB = ($b['month_status'] !== 'paid' || (float)$b['month_due'] > 0) ? 1 : 0;
             if ($isUnpaidA !== $isUnpaidB) {
-                return $isUnpaidB - $isUnpaidA; // Unpaid (1) before Paid (0)
+                return $isUnpaidB - $isUnpaidA;
             }
 
             if ($isUnpaidA === 1) {
-                // Both are Unpaid: Earliest Bill Pay Date (Overdue / Today / Upcoming) on top!
-                $dateA = (!empty($a['last_paid_date']) && $a['last_paid_date'] !== '0000-00-00') ? $a['last_paid_date'] : '9999-99-99';
-                $dateB = (!empty($b['last_paid_date']) && $b['last_paid_date'] !== '0000-00-00') ? $b['last_paid_date'] : '9999-99-99';
+                $dateA = (!empty($a['month_pay_date']) && $a['month_pay_date'] !== '0000-00-00') ? $a['month_pay_date'] : '9999-99-99';
+                $dateB = (!empty($b['month_pay_date']) && $b['month_pay_date'] !== '0000-00-00') ? $b['month_pay_date'] : '9999-99-99';
                 if ($dateA !== $dateB) {
                     return strcmp($dateA, $dateB);
                 }
-                // If same date, higher due amount first
-                if ((float)$a['custom_due_amount'] !== (float)$b['custom_due_amount']) {
-                    return ((float)$b['custom_due_amount'] > (float)$a['custom_due_amount']) ? 1 : -1;
+                if ((float)$a['month_due'] !== (float)$b['month_due']) {
+                    return ((float)$b['month_due'] > (float)$a['month_due']) ? 1 : -1;
                 }
             } else {
-                // Both are Paid: Most recently paid date on top
-                $dateA = (!empty($a['last_paid_date']) && $a['last_paid_date'] !== '0000-00-00') ? $a['last_paid_date'] : '0000-00-00';
-                $dateB = (!empty($b['last_paid_date']) && $b['last_paid_date'] !== '0000-00-00') ? $b['last_paid_date'] : '0000-00-00';
+                $dateA = (!empty($a['month_pay_date']) && $a['month_pay_date'] !== '0000-00-00') ? $a['month_pay_date'] : '0000-00-00';
+                $dateB = (!empty($b['month_pay_date']) && $b['month_pay_date'] !== '0000-00-00') ? $b['month_pay_date'] : '0000-00-00';
                 if ($dateA !== $dateB) {
                     return strcmp($dateB, $dateA);
                 }
@@ -1407,6 +1501,38 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 $clientFilterOptions .= '<option value="' . $cg['group_key'] . '">' . $cId . ' - ' . csm_h($cg['client_name'] . $cAlias . $cComp) . ' (' . $itemCount . ')</option>';
             }
         }
+
+        // Month Navigation Toolbar Bar
+        $html .= '<div class="csm-month-navigator" style="background:#ffffff;border:1px solid #dce6f2;border-radius:10px;padding:14px 20px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;box-shadow:0 4px 14px rgba(15,23,42,0.04);">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <span style="font-size:13px;font-weight:800;color:#0f5ea8;text-transform:uppercase;letter-spacing:0.5px;">
+                    <i class="fas fa-calendar-days"></i> Billing Month:
+                </span>
+                <div class="btn-group" role="group">
+                    <a href="' . $moduleLink . '&action=custom_customers&month=' . $prevMonth . '" class="btn btn-default btn-sm" title="Previous Month (' . date('M Y', strtotime($prevMonth . '-01')) . ')"><i class="fas fa-chevron-left"></i> Prev</a>
+                    <select id="csmMonthJumpSelect" onchange="window.location.href=\'' . $moduleLink . '&action=custom_customers&month=\'+this.value;" class="btn btn-default btn-sm" style="font-weight:700;color:#0f5ea8;border-left:0;border-right:0;height:30px;padding:3px 10px;background:#f8fafc;outline:none;">
+                        ' . $monthSelectOptions . '
+                    </select>
+                    <a href="' . $moduleLink . '&action=custom_customers&month=' . $nextMonth . '" class="btn btn-default btn-sm" title="Next Month (' . date('M Y', strtotime($nextMonth . '-01')) . ')">Next <i class="fas fa-chevron-right"></i></a>
+                </div>
+                ' . ($isCurrentMonth ? '<span class="badge" style="background:#16a34a;color:#fff;font-size:11px;font-weight:700;padding:5px 9px;"><i class="fas fa-clock"></i> Current Active Month</span>' : '<a href="' . $moduleLink . '&action=custom_customers" class="btn btn-warning btn-xs" style="font-weight:700;"><i class="fas fa-arrow-rotate-left"></i> Jump to Current Month</a>') . '
+            </div>
+            
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;">
+                <div style="background:#f8fafc;border:1px solid #e2e8f0;padding:6px 14px;border-radius:6px;">
+                    <span style="color:#64748b;font-size:10.5px;display:block;font-weight:700;text-transform:uppercase;">Month Total Target</span>
+                    <strong style="color:#0f5ea8;font-size:15px;">' . $currPrefix . number_format($globalMonthTotalRecurring, 2) . $currSuffix . '</strong>
+                </div>
+                <div style="background:#f0fdf4;border:1px solid #bbf7d0;padding:6px 14px;border-radius:6px;">
+                    <span style="color:#166534;font-size:10.5px;display:block;font-weight:700;text-transform:uppercase;">Collected / Paid</span>
+                    <strong style="color:#16a34a;font-size:15px;"><i class="fas fa-circle-check"></i> ' . $currPrefix . number_format($globalMonthTotalPaid, 2) . $currSuffix . '</strong>
+                </div>
+                <div style="background:#fef2f2;border:1px solid #fecaca;padding:6px 14px;border-radius:6px;">
+                    <span style="color:#991b1b;font-size:10.5px;display:block;font-weight:700;text-transform:uppercase;">Remaining Due</span>
+                    <strong style="color:#dc2626;font-size:15px;"><i class="fas fa-circle-exclamation"></i> ' . $currPrefix . number_format($globalTotalCustomDue, 2) . $currSuffix . '</strong>
+                </div>
+            </div>
+        </div>';
 
         // 6 Summary Stats Cards
         $html .= '<div class="csm-stats" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
@@ -1431,7 +1557,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 <div class="csm-stat-value" style="color:#dc2626;">' . $globalOverdueCount . '</div>
             </div>
             <div class="csm-stat" onclick="csmFilterCustom(\'unpaid\')" title="Show Total Custom Dues">
-                <div class="csm-stat-label">Total Custom Due</div>
+                <div class="csm-stat-label">' . $selectedMonthName . ' Due</div>
                 <div class="csm-stat-value" style="color:#dc2626;font-size:18px;">' . $currPrefix . number_format((float)$globalTotalCustomDue, 2) . $currSuffix . '</div>
             </div>
         </div>';
@@ -1441,9 +1567,9 @@ if (!function_exists('csm_render_custom_customers_page')) {
             <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                 <div>
                     <h4 style="margin:0;font-weight:800;color:#1e293b;font-size:16px;">
-                        <i class="fas fa-building-user text-primary"></i> Corporate Customers &amp; Payment Ledgers
+                        <i class="fas fa-building-user text-primary"></i> Corporate Customers &amp; Monthly Ledgers (' . $selectedMonthName . ')
                     </h4>
-                    <div class="csm-muted">Client-centric live monitoring with custom nicknames, manual due ledger notes and one-click bill payment confirmation.</div>
+                    <div class="csm-muted">Monthly billing ledger with automatic recurring dues, partial/full payment tracking, custom nicknames, and historical records.</div>
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
                     <button type="button" class="btn btn-default btn-sm" id="csmToggleFilterBtn" onclick="csmToggleFilterPanel()"><i class="fas fa-filter text-primary"></i> <span id="csmToggleFilterText">Show Search &amp; Filters</span></button>
@@ -1559,9 +1685,9 @@ if (!function_exists('csm_render_custom_customers_page')) {
             <div class="csm-table-header" style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                 <div>
                     <h3 style="margin:0;font-size:18px;font-weight:800;color:#1e293b;">
-                        <i class="fas fa-users-viewfinder text-primary"></i> Corporate Customers &amp; Services Overview
+                        <i class="fas fa-users-viewfinder text-primary"></i> Corporate Customers &amp; Ledger Overview (' . $selectedMonthName . ')
                     </h3>
-                    <div class="csm-muted">Click <strong>"View Products"</strong> on any client row to view and manage their individual hosting, VPS, domains and custom dues.</div>
+                    <div class="csm-muted">Showing monthly billing dues, payments, fixed pay days and services for <strong>' . $selectedMonthName . '</strong>.</div>
                 </div>
                 <div style="display:flex;gap:8px;align-items:center;">
                     <button type="button" class="btn btn-default btn-sm" onclick="csmExpandAllClients()" style="font-weight:700;"><i class="fas fa-folder-open text-primary"></i> Expand All</button>
@@ -1575,10 +1701,10 @@ if (!function_exists('csm_render_custom_customers_page')) {
                             <th width="75">Client ID</th>
                             <th>Client &amp; Contact</th>
                             <th>Phone / WhatsApp</th>
-                            <th class="text-center" width="110">Products</th>
-                            <th>Total Recurring</th>
-                            <th>Custom Due Note</th>
-                            <th>Bill Paid Date</th>
+                            <th class="text-center" width="100">Products</th>
+                            <th>Monthly Bill</th>
+                            <th>Paid &amp; Due Note</th>
+                            <th>Bill Pay Date</th>
                             <th class="text-center" width="90">Paid Action</th>
                             <th class="text-center" width="220">Action</th>
                         </tr>
@@ -1620,10 +1746,10 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 $waTemplate = csm_get_setting('wa_template', '');
                 $firstItemName = !empty($grp['items']) ? $grp['items'][0]['product_name'] : 'Services';
                 $firstItemDomain = !empty($grp['items']) ? ($grp['items'][0]['domain'] ?: 'N/A') : 'N/A';
-                $earliestDueFmt = (!empty($grp['earliest_due_date']) && $grp['earliest_due_date'] !== '0000-00-00') ? date('d/m/Y', strtotime($grp['earliest_due_date'])) : 'N/A';
+                $earliestDueFmt = (!empty($grp['month_pay_date']) && $grp['month_pay_date'] !== '0000-00-00') ? date('d/m/Y', strtotime($grp['month_pay_date'])) : ((!empty($grp['earliest_due_date']) && $grp['earliest_due_date'] !== '0000-00-00') ? date('d/m/Y', strtotime($grp['earliest_due_date'])) : 'N/A');
                 $waMessage = str_replace(
                     ['{client_name}', '{service_name}', '{domain}', '{due_date}', '{amount}'],
-                    [$grp['client_name'], $firstItemName . ' (' . $itemsCount . ' Items)', $firstItemDomain, $earliestDueFmt, $currPrefix . number_format((float)$grp['custom_due_amount'], 2) . $currSuffix],
+                    [$grp['client_name'], $firstItemName . ' (' . $itemsCount . ' Items)', $firstItemDomain, $earliestDueFmt, $currPrefix . number_format((float)$grp['month_due'], 2) . $currSuffix],
                     $waTemplate
                 );
                 $waUrl = !empty($intlPhone) ? 'https://wa.me/' . $intlPhone . '?text=' . urlencode($waMessage) : '';
@@ -1653,12 +1779,14 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 }
 
                 // Month Bill Status Badge
-                $monthName = date('F');
+                $mStatus = $grp['month_status'];
                 $monthStatusBadge = '';
-                if ($isUnpaid) {
-                    $monthStatusBadge = '<span class="label label-danger" style="font-size:10.5px;font-weight:700;padding:2px 7px;display:inline-block;margin-top:3px;"><i class="fas fa-circle-xmark"></i> ' . $monthName . ': Unpaid</span>';
+                if ($mStatus === 'paid') {
+                    $monthStatusBadge = '<span class="label label-success" style="font-size:10.5px;font-weight:700;padding:2px 7px;display:inline-block;margin-top:3px;"><i class="fas fa-circle-check"></i> ' . $selectedMonthName . ': Paid</span>';
+                } elseif ($mStatus === 'partial') {
+                    $monthStatusBadge = '<span class="label label-warning" style="font-size:10.5px;font-weight:700;padding:2px 7px;display:inline-block;margin-top:3px;background:#f59e0b;"><i class="fas fa-circle-half-stroke"></i> ' . $selectedMonthName . ': Partial (Due ' . $currPrefix . number_format($grp['month_due'], 2) . $currSuffix . ')</span>';
                 } else {
-                    $monthStatusBadge = '<span class="label label-success" style="font-size:10.5px;font-weight:700;padding:2px 7px;display:inline-block;margin-top:3px;"><i class="fas fa-circle-check"></i> ' . $monthName . ': Paid</span>';
+                    $monthStatusBadge = '<span class="label label-danger" style="font-size:10.5px;font-weight:700;padding:2px 7px;display:inline-block;margin-top:3px;"><i class="fas fa-circle-xmark"></i> ' . $selectedMonthName . ': Unpaid (Due ' . $currPrefix . number_format($grp['month_due'], 2) . $currSuffix . ')</span>';
                 }
 
                 $clientContactCell = '';
@@ -1668,24 +1796,27 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     $clientContactCell = '<div style="font-size:14.5px;font-weight:800;color:#1e293b;margin-bottom:3px;">' . $clientLink . '</div>' . $aliasBadgeHtml . '<div>' . $monthStatusBadge . '</div>';
                 }
 
-                // Custom Due Note Column display
-                $customDueAmount = (float)$grp['custom_due_amount'];
-                $customDueNote = trim($grp['custom_due_note']);
-                $dueDisplayHtml = '';
-                if ($customDueAmount > 0) {
-                    $dueDisplayHtml = '<strong id="csmDueAmountDisplay_' . $key . '" style="color:#dc2626;font-size:14px;"><i class="fas fa-circle-exclamation text-danger"></i> ' . $currPrefix . number_format($customDueAmount, 2) . $currSuffix . '</strong>';
-                } else {
-                    $dueDisplayHtml = '<span id="csmDueAmountDisplay_' . $key . '" style="color:#16a34a;font-weight:700;"><i class="fas fa-check-circle"></i> ' . $currPrefix . '0.00' . $currSuffix . '</span>';
-                }
+                // Paid & Due Note Column display
+                $mRecurring = (float)$grp['month_recurring'];
+                $mPaid = (float)$grp['month_paid'];
+                $mDue = (float)$grp['month_due'];
+                $mNotes = trim($grp['month_notes']);
 
-                $dueNoteSnippet = !empty($customDueNote) ? '<div id="csmDueNoteDisplay_' . $key . '" style="font-size:11.5px;color:#475569;margin-top:2px;max-width:200px;word-break:break-word;"><i class="fas fa-note-sticky text-info"></i> ' . csm_h($customDueNote) . '</div>' : '<div id="csmDueNoteDisplay_' . $key . '" style="font-size:11px;color:#94a3b8;margin-top:2px;">No remarks</div>';
+                $dueDisplayHtml = '<div style="font-size:12px;">' .
+                    '<span style="color:#16a34a;font-weight:700;"><i class="fas fa-check"></i> Paid: ' . $currPrefix . number_format($mPaid, 2) . $currSuffix . '</span> ' .
+                    '<span style="color:#dc2626;font-weight:700;margin-left:5px;"><i class="fas fa-exclamation-circle"></i> Due: ' . $currPrefix . number_format($mDue, 2) . $currSuffix . '</span>' .
+                    '</div>';
 
-                $editDueBtn = '<button type="button" class="btn btn-default btn-xs" onclick="event.stopPropagation(); openEditClientDueModal(\'' . $key . '\', ' . $customDueAmount . ', \'' . csm_h(addslashes($customDueNote)) . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\', \'' . csm_h(addslashes($grp['last_paid_date'] ?: '')) . '\', \'' . csm_h(addslashes($grp['paid_status'] ?: '')) . '\')" style="margin-top:4px;font-size:11px;" title="Edit Custom Due, Note &amp; Bill Pay Date"><i class="fas fa-pen-to-square text-primary"></i> Edit Due</button>';
+                $dueNoteSnippet = !empty($mNotes) ? '<div id="csmDueNoteDisplay_' . $key . '" style="font-size:11.5px;color:#475569;margin-top:2px;max-width:210px;word-break:break-word;"><i class="fas fa-note-sticky text-info"></i> ' . csm_h($mNotes) . '</div>' : '<div id="csmDueNoteDisplay_' . $key . '" style="font-size:11px;color:#94a3b8;margin-top:2px;">No remarks</div>';
+
+                $editDueBtn = '<button type="button" class="btn btn-default btn-xs" onclick="event.stopPropagation(); openEditClientDueModal(\'' . $key . '\', ' . $mRecurring . ', ' . $mPaid . ', ' . $mDue . ', \'' . csm_h(addslashes($mNotes)) . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\', \'' . csm_h(addslashes($grp['month_pay_date'])) . '\', \'' . csm_h(addslashes($mStatus)) . '\', ' . (int)($grp['month_pay_day'] ?? 0) . ', \'' . csm_h($selectedMonth) . '\')" style="margin-top:4px;font-size:11px;" title="Edit Monthly Bill, Paid, Due &amp; Pay Date"><i class="fas fa-pen-to-square text-primary"></i> Edit Due &amp; Paid</button>';
 
                 // Bill Pay Date display (কবে বিল পে করবে / Paid Date)
-                $billPayDate = $grp['last_paid_date'];
+                $billPayDate = $grp['month_pay_date'];
                 $hasDate = (!empty($billPayDate) && $billPayDate !== '0000-00-00');
-                $isUnpaid = ($customDueAmount > 0 || strtolower($grp['paid_status'] ?? '') !== 'paid');
+                $isUnpaid = ($mStatus !== 'paid' || $mDue > 0);
+
+                $payDayBadge = !empty($grp['month_pay_day']) ? '<div style="font-size:10.5px;color:#64748b;margin-top:1px;"><i class="fas fa-repeat text-primary" style="font-size:9.5px;"></i> Fixed: ' . (int)$grp['month_pay_day'] . 'th of month</div>' : '';
 
                 if ($hasDate) {
                     $pTs = strtotime($billPayDate);
@@ -1708,22 +1839,24 @@ if (!function_exists('csm_render_custom_customers_page')) {
                             $dateColor = '#0f5ea8';
                         }
                     }
-                    $paidDateDisplayHtml = '<div onclick="event.stopPropagation(); openEditClientDueModal(\'' . $key . '\', ' . $customDueAmount . ', \'' . csm_h(addslashes($customDueNote)) . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\', \'' . csm_h(addslashes($billPayDate)) . '\', \'' . csm_h(addslashes($grp['paid_status'] ?: '')) . '\')" style="cursor:pointer;" title="Click to edit Bill Pay Date">'
+                    $paidDateDisplayHtml = '<div onclick="event.stopPropagation(); openEditClientDueModal(\'' . $key . '\', ' . $mRecurring . ', ' . $mPaid . ', ' . $mDue . ', \'' . csm_h(addslashes($mNotes)) . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\', \'' . csm_h(addslashes($billPayDate)) . '\', \'' . csm_h(addslashes($mStatus)) . '\', ' . (int)($grp['month_pay_day'] ?? 0) . ', \'' . csm_h($selectedMonth) . '\')" style="cursor:pointer;" title="Click to edit Bill Pay Date">'
                         . '<strong id="csmPaidDateDisplay_' . $key . '" style="color:' . $dateColor . ';font-size:13px;"><i class="fas fa-calendar-check" style="font-size:11px;margin-right:3px;"></i> ' . $dateFmt . '</strong>'
                         . '<br><span id="csmPaidBadgeDisplay_' . $key . '">' . $paidBadge . '</span>'
+                        . $payDayBadge
                         . '</div>';
                 } else {
-                    $paidDateDisplayHtml = '<div onclick="event.stopPropagation(); openEditClientDueModal(\'' . $key . '\', ' . $customDueAmount . ', \'' . csm_h(addslashes($customDueNote)) . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\', \'\', \'' . csm_h(addslashes($grp['paid_status'] ?: '')) . '\')" style="cursor:pointer;" title="Click to set Bill Pay Date">'
+                    $paidDateDisplayHtml = '<div onclick="event.stopPropagation(); openEditClientDueModal(\'' . $key . '\', ' . $mRecurring . ', ' . $mPaid . ', ' . $mDue . ', \'' . csm_h(addslashes($mNotes)) . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\', \'\', \'' . csm_h(addslashes($mStatus)) . '\', ' . (int)($grp['month_pay_day'] ?? 0) . ', \'' . csm_h($selectedMonth) . '\')" style="cursor:pointer;" title="Click to set Bill Pay Date">'
                         . '<span id="csmPaidDateDisplay_' . $key . '" style="color:#0284c7;font-size:12px;font-weight:600;"><i class="fas fa-calendar-plus"></i> Set Date</span>'
                         . '<br><span id="csmPaidBadgeDisplay_' . $key . '" class="label label-default" style="font-size:9px;">Not Set</span>'
+                        . $payDayBadge
                         . '</div>';
                 }
 
                 // Quick Mark Paid Action Button
-                $paidBtn = '<button type="button" class="btn btn-success btn-sm" id="btnPaid_' . $key . '" onclick="event.stopPropagation(); csmQuickMarkPaid(\'' . $key . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\')" style="font-weight:700;border-radius:6px;padding:5px 12px;" title="Mark Paid and Clear Due"><i class="fas fa-check"></i> Paid</button>';
+                $paidBtn = '<button type="button" class="btn btn-success btn-sm" id="btnPaid_' . $key . '" onclick="event.stopPropagation(); csmQuickMarkPaid(\'' . $key . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\', ' . $mRecurring . ', \'' . csm_h($selectedMonth) . '\')" style="font-weight:700;border-radius:6px;padding:5px 12px;" title="Mark Paid and Clear Due for ' . $selectedMonthName . '"><i class="fas fa-check"></i> Paid</button>';
 
-                // Client Row Action Shortcuts (No dologin, added Overview button)
-                $overviewBtn = '<button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation(); openClientOverviewModal(\'' . $key . '\')" style="font-weight:700;background:#0f5ea8;border-color:#0f5ea8;color:#fff;" title="View Complete Client Overview &amp; Ledger"><i class="fas fa-chart-pie"></i> Overview</button> ';
+                // Client Row Action Shortcuts
+                $overviewBtn = '<button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation(); openClientOverviewModal(\'' . $key . '\')" style="font-weight:700;background:#0f5ea8;border-color:#0f5ea8;color:#fff;" title="View Complete Client Overview &amp; Monthly Ledger"><i class="fas fa-chart-pie"></i> Overview</button> ';
                 $whmcsSummaryBtn = ($isWhmcs && $userId > 0) ? '<a href="clientssummary.php?userid=' . $userId . '" target="_blank" class="btn btn-default btn-sm" title="View WHMCS Client Profile"><i class="fas fa-user-check text-primary"></i></a> ' : '';
                 $configureScopeBtn = ($isWhmcs && $userId > 0) ? '<button type="button" class="btn btn-default btn-sm" onclick="openConfigureClientModal(' . $userId . ')" title="Configure Monitored Services &amp; Scope"><i class="fas fa-sliders text-warning"></i></button> ' : '';
                 $removeClientBtn = '';
@@ -1754,7 +1887,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     }
                 }
 
-                $searchCorpus = strtolower($userId . ' ' . $grp['client_name'] . ' ' . $customAlias . ' ' . $customDueNote . ' ' . $cleanDisplayPhone . ' ' . $digitsPhone . ' ' . implode(' ', $childSearchTerms));
+                $searchCorpus = strtolower($userId . ' ' . $grp['client_name'] . ' ' . $customAlias . ' ' . $mNotes . ' ' . $cleanDisplayPhone . ' ' . $digitsPhone . ' ' . implode(' ', $childSearchTerms));
                 $productTypesStr = implode(',', array_unique($childProductTypes));
                 $billingCyclesStr = implode(',', array_unique($childBillingCycles));
                 $serverIdsStr = implode(',', array_unique($childServerIds));
@@ -1789,8 +1922,8 @@ if (!function_exists('csm_render_custom_customers_page')) {
                         </span>
                     </td>
                     <td onclick="csmToggleClientRow(\'' . $key . '\')">
-                        <strong>' . $currPrefix . number_format((float)$grp['total_recurring'], 2) . $currSuffix . '</strong>
-                        <br><small class="text-muted">Total Active/Mo</small>
+                        <strong>' . $currPrefix . number_format($mRecurring, 2) . $currSuffix . '</strong>
+                        <br><small class="text-muted">Target Bill / Mo</small>
                     </td>
                     <td>
                         ' . $dueDisplayHtml . '
@@ -2312,47 +2445,118 @@ if (!function_exists('csm_render_custom_customers_page')) {
             </div>
         </div>';
 
-        // Modal 6: Edit Corporate Client Due & Note Modal
+        // Modal 6: Edit Corporate Client Monthly Accounting & Due Modal
+        $payDayOptionsHtml = '<option value="">-- No Fixed Day (Custom Override) --</option>';
+        for ($d = 1; $d <= 31; $d++) {
+            $suffix = 'th';
+            if ($d == 1 || $d == 21 || $d == 31) $suffix = 'st';
+            elseif ($d == 2 || $d == 22) $suffix = 'nd';
+            elseif ($d == 3 || $d == 23) $suffix = 'rd';
+            $payDayOptionsHtml .= '<option value="' . $d . '">' . $d . $suffix . ' of every month</option>';
+        }
+
         $html .= '
         <div class="modal fade" id="csmClientDueModal" tabindex="-1" role="dialog">
             <div class="modal-dialog modal-md" role="document">
-                <div class="modal-content" style="border-radius:8px;">
-                    <div class="modal-header" style="background:#12589b;color:#fff;border-radius:7px 7px 0 0;padding:14px 18px;">
-                        <button type="button" class="close" data-dismiss="modal" style="color:#fff;">&times;</button>
-                        <h4 class="modal-title" style="font-size:15px;font-weight:700;"><i class="fas fa-pen-to-square"></i> Edit Custom Due &amp; Note</h4>
+                <div class="modal-content" style="border-radius:10px;overflow:hidden;box-shadow:0 20px 40px rgba(0,0,0,0.25);">
+                    <div class="modal-header" style="background:#0f5ea8;color:#fff;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;">
+                        <h4 class="modal-title" style="font-size:16px;font-weight:800;margin:0;">
+                            <i class="fas fa-file-invoice-dollar"></i> Monthly Accounting &amp; Due Ledger
+                        </h4>
+                        <button type="button" class="close" data-dismiss="modal" style="color:#fff;opacity:0.9;font-size:22px;">&times;</button>
                     </div>
-                    <div class="modal-body" style="padding:18px;">
+                    <div class="modal-body" style="padding:20px;background:#f8fafc;">
                         <input type="hidden" id="modalDueGroupKey" value="">
-                        <div class="form-group" style="margin-bottom:12px;">
-                            <label style="font-size:12px;color:#64748b;">Target Client:</label>
-                            <div id="modalDueClientName" style="font-weight:700;color:#1e293b;"></div>
-                        </div>
-                        <div class="row">
-                            <div class="col-md-6 form-group">
-                                <label style="font-weight:700;color:#334155;">Custom Due Amount (' . csm_h(trim($currPrefix . $currSuffix)) . '):</label>
-                                <input type="number" step="0.01" id="modalDueAmountInput" class="form-control" placeholder="0.00">
+                        
+                        <!-- Target Client Banner & Billing Month -->
+                        <div style="background:#ffffff;border:1px solid #dce6f2;border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                            <div>
+                                <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Corporate Client</div>
+                                <div id="modalDueClientName" style="font-weight:800;color:#1e293b;font-size:15px;margin-top:2px;"></div>
                             </div>
-                            <div class="col-md-6 form-group">
-                                <label style="font-weight:700;color:#334155;">Due Status:</label>
-                                <select id="modalDueStatusInput" class="form-control">
-                                    <option value="unpaid">Unpaid / Pending</option>
-                                    <option value="paid">Paid / Clear</option>
-                                </select>
+                            <div>
+                                <span class="label label-primary" id="modalDueBillingMonthBadge" style="font-size:12px;font-weight:700;padding:5px 12px;border-radius:6px;background:#12589b;"></span>
+                                <input type="hidden" id="modalDueBillingMonthInput" value="' . csm_h($selectedMonth) . '">
                             </div>
                         </div>
-                        <div class="form-group" style="margin-bottom:14px;">
-                            <label style="font-weight:700;color:#334155;"><i class="fas fa-calendar-alt text-primary"></i> Bill Pay Date (কবে বিল পে করবে / Paid Date):</label>
-                            <input type="date" id="modalDuePaidDateInput" class="form-control">
-                            <small class="text-muted" style="font-size:11.5px;">Expected bill payment date (used for auto sorting table rows).</small>
+
+                        <!-- Bill Pay Date Settings (Monthly Fixed Day vs Specific Date) -->
+                        <div style="background:#ffffff;border:1px solid #dce6f2;border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+                            <h5 style="margin:0 0 10px 0;font-weight:800;color:#0f5ea8;font-size:13px;border-bottom:1px solid #f1f5f9;padding-bottom:5px;">
+                                <i class="fas fa-calendar-check"></i> Bill Pay Date Rules
+                            </h5>
+                            <div class="row">
+                                <div class="col-md-6 form-group" style="margin-bottom:6px;">
+                                    <label style="font-weight:700;color:#334155;font-size:12px;"><i class="fas fa-repeat text-primary"></i> Monthly Fixed Pay Day:</label>
+                                    <select id="modalDueMonthlyPayDayInput" class="form-control input-sm">
+                                        ' . $payDayOptionsHtml . '
+                                    </select>
+                                    <small class="text-muted" style="font-size:10.5px;display:block;margin-top:2px;">Fixed day (1–31) client pays bill every month.</small>
+                                </div>
+                                <div class="col-md-6 form-group" style="margin-bottom:6px;">
+                                    <label style="font-weight:700;color:#334155;font-size:12px;"><i class="fas fa-calendar-day text-info"></i> Specific Month Pay Date:</label>
+                                    <input type="date" id="modalDuePaidDateInput" class="form-control input-sm">
+                                    <small class="text-muted" style="font-size:10.5px;display:block;margin-top:2px;">Custom date override for this specific month.</small>
+                                </div>
+                            </div>
                         </div>
+
+                        <!-- Financial Ledger: Total Recurring -> Paid Amount -> Remaining Due -> Status -->
+                        <div style="background:#ffffff;border:1px solid #dce6f2;border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+                            <h5 style="margin:0 0 10px 0;font-weight:800;color:#0f5ea8;font-size:13px;border-bottom:1px solid #f1f5f9;padding-bottom:5px;">
+                                <i class="fas fa-calculator"></i> Accounting Ledger &amp; Due Calculation
+                            </h5>
+                            <div class="row">
+                                <div class="col-md-4 form-group">
+                                    <label style="font-weight:700;color:#334155;font-size:12px;">Total Bill / Recurring:</label>
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-addon" style="font-weight:700;">' . csm_h(trim($currPrefix)) . '</span>
+                                        <input type="number" step="0.01" id="modalDueTotalRecurringInput" class="form-control" placeholder="0.00" oninput="csmRecalculateDue()">
+                                    </div>
+                                </div>
+                                <div class="col-md-4 form-group">
+                                    <label style="font-weight:700;color:#16a34a;font-size:12px;">Paid Amount:</label>
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-addon" style="background:#dcfce7;color:#16a34a;font-weight:700;">' . csm_h(trim($currPrefix)) . '</span>
+                                        <input type="number" step="0.01" id="modalDuePaidAmountInput" class="form-control" placeholder="0.00" oninput="csmRecalculateDue()">
+                                    </div>
+                                </div>
+                                <div class="col-md-4 form-group">
+                                    <label style="font-weight:700;color:#dc2626;font-size:12px;">Remaining Due:</label>
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-addon" style="background:#fee2e2;color:#dc2626;font-weight:700;">' . csm_h(trim($currPrefix)) . '</span>
+                                        <input type="number" step="0.01" id="modalDueAmountInput" class="form-control" placeholder="0.00">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row" style="margin-top:4px;">
+                                <div class="col-md-6 form-group" style="margin-bottom:0;">
+                                    <label style="font-weight:700;color:#334155;font-size:12px;">Payment Status:</label>
+                                    <select id="modalDueStatusInput" class="form-control input-sm">
+                                        <option value="unpaid">Unpaid (Full Due Pending)</option>
+                                        <option value="partial">Partial (Partially Paid)</option>
+                                        <option value="paid">Paid (Cleared 100%)</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6 form-group" style="margin-bottom:0;">
+                                    <label style="font-weight:700;color:#334155;font-size:12px;">Quick Settlement:</label>
+                                    <div style="display:flex;gap:4px;">
+                                        <button type="button" class="btn btn-success btn-sm btn-block" onclick="csmFillFullPaid()" style="font-weight:700;"><i class="fas fa-check-double"></i> 100% Paid</button>
+                                        <button type="button" class="btn btn-default btn-sm btn-block" onclick="csmFillZeroPaid()"><i class="fas fa-rotate-left"></i> Reset Due</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Remarks / Due Note -->
                         <div class="form-group" style="margin-bottom:0;">
-                            <label style="font-weight:700;color:#334155;">Custom Due Note / Remarks:</label>
-                            <textarea id="modalDueNoteInput" class="form-control" rows="2" placeholder="e.g. Total 3 servers due, promises to pay on 25th"></textarea>
+                            <label style="font-weight:700;color:#334155;font-size:12px;"><i class="fas fa-comment-dots text-primary"></i> Payment Remarks &amp; Notes:</label>
+                            <textarea id="modalDueNoteInput" class="form-control" rows="2" placeholder="e.g. Paid 3000 Tk via bKash TrxID #... remaining 2000 Tk promised on 25th"></textarea>
                         </div>
                     </div>
-                    <div class="modal-footer" style="background:#f8fafc;padding:12px 18px;">
+                    <div class="modal-footer" style="background:#f1f5f9;padding:12px 20px;">
                         <button type="button" class="btn btn-default btn-sm" data-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-primary btn-sm" id="btnSaveDueAjax" onclick="csmSaveClientDueAjax()"><i class="fas fa-save"></i> Save Due &amp; Date</button>
+                        <button type="button" class="btn btn-primary btn-sm" id="btnSaveDueAjax" onclick="csmSaveClientDueAjax()"><i class="fas fa-save"></i> Save Ledger Entry</button>
                     </div>
                 </div>
             </div>
@@ -2363,8 +2567,8 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
         $html .= '
         <div class="modal fade" id="csmClientOverviewModal" tabindex="-1" role="dialog">
-            <div class="modal-dialog modal-lg" style="width:90%;max-width:1050px;" role="document">
-                <div class="modal-content" style="border-radius:10px;overflow:hidden;box-shadow:0 20px 40px rgba(0,0,0,0.2);">
+            <div class="modal-dialog modal-lg" style="width:92%;max-width:1150px;" role="document">
+                <div class="modal-content" style="border-radius:10px;overflow:hidden;box-shadow:0 20px 40px rgba(0,0,0,0.25);">
                     <div class="modal-header" style="background:#0f5ea8;color:#fff;padding:16px 22px;display:flex;justify-content:space-between;align-items:center;">
                         <div>
                             <h4 class="modal-title" id="overviewModalTitle" style="font-weight:800;font-size:18px;margin:0;">
@@ -2377,47 +2581,84 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     <div class="modal-body" style="padding:22px;background:#f8fafc;">
                         <!-- Top Summary Cards Row -->
                         <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:12px;margin-bottom:20px;">
+                            <div style="background:#ffffff;border:1px solid #dce6f2;border-radius:8px;padding:12px 14px;border-left:4px solid #8b5cf6;">
+                                <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Target Recurring / Mo</div>
+                                <div id="overviewRecurringTotal" style="font-size:20px;font-weight:800;color:#7c3aed;margin-top:2px;">৳ 0.00</div>
+                                <div id="overviewProductsCount" style="font-size:11px;color:#64748b;margin-top:3px;">0 Monitored Items</div>
+                            </div>
+                            <div style="background:#ffffff;border:1px solid #dce6f2;border-radius:8px;padding:12px 14px;border-left:4px solid #16a34a;">
+                                <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">This Month Paid</div>
+                                <div id="overviewMonthPaidAmount" style="font-size:20px;font-weight:800;color:#16a34a;margin-top:2px;">৳ 0.00</div>
+                                <div id="overviewMonthStatusBadge" style="margin-top:3px;"></div>
+                            </div>
                             <div style="background:#ffffff;border:1px solid #dce6f2;border-radius:8px;padding:12px 14px;border-left:4px solid #dc2626;">
-                                <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Custom Due Balance</div>
+                                <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">This Month Due</div>
                                 <div id="overviewDueAmount" style="font-size:20px;font-weight:800;color:#dc2626;margin-top:2px;">৳ 0.00</div>
                                 <div id="overviewDueNoteSnippet" style="font-size:11px;color:#475569;margin-top:3px;word-break:break-word;"></div>
                             </div>
-                            <div style="background:#ffffff;border:1px solid #dce6f2;border-radius:8px;padding:12px 14px;border-left:4px solid #16a34a;">
-                                <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">This Month Status</div>
-                                <div id="overviewMonthStatus" style="font-size:18px;font-weight:800;color:#16a34a;margin-top:4px;">Paid</div>
-                                <div id="overviewMonthSub" style="font-size:11px;color:#64748b;margin-top:3px;">Current Cycle</div>
-                            </div>
                             <div style="background:#ffffff;border:1px solid #dce6f2;border-radius:8px;padding:12px 14px;border-left:4px solid #0284c7;">
                                 <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Bill Pay Date</div>
-                                <div id="overviewBillPayDate" style="font-size:18px;font-weight:800;color:#0f5ea8;margin-top:4px;">Not Set</div>
+                                <div id="overviewBillPayDate" style="font-size:18px;font-weight:800;color:#0f5ea8;margin-top:2px;">Not Set</div>
                                 <div id="overviewBillPayBadge" style="margin-top:3px;"></div>
-                            </div>
-                            <div style="background:#ffffff;border:1px solid #dce6f2;border-radius:8px;padding:12px 14px;border-left:4px solid #8b5cf6;">
-                                <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Recurring Total</div>
-                                <div id="overviewRecurringTotal" style="font-size:20px;font-weight:800;color:#7c3aed;margin-top:2px;">৳ 0.00</div>
-                                <div id="overviewProductsCount" style="font-size:11px;color:#64748b;margin-top:3px;">0 Active Products</div>
                             </div>
                         </div>
 
                         <!-- Action Toolbar -->
                         <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
                             <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                                <button type="button" class="btn btn-success btn-sm" id="overviewBtnPaid" style="font-weight:700;"><i class="fas fa-check"></i> Mark Paid Today</button>
-                                <button type="button" class="btn btn-default btn-sm" id="overviewBtnEditDue" style="font-weight:700;"><i class="fas fa-pen-to-square text-primary"></i> Edit Due &amp; Pay Date</button>
+                                <button type="button" class="btn btn-success btn-sm" id="overviewBtnPaid" style="font-weight:700;"><i class="fas fa-check"></i> Mark Paid (' . csm_h($selectedMonthName) . ')</button>
+                                <button type="button" class="btn btn-primary btn-sm" id="overviewBtnEditDue" style="font-weight:700;"><i class="fas fa-pen-to-square"></i> Edit Ledger &amp; Pay Date</button>
                                 <button type="button" class="btn btn-default btn-sm" id="overviewBtnEditAlias" style="font-weight:700;"><i class="fas fa-id-badge text-warning"></i> Change Custom Name</button>
                                 <button type="button" class="btn btn-default btn-sm" id="overviewBtnAddNote" style="font-weight:700;"><i class="fas fa-plus text-info"></i> Add Payment Remark</button>
                             </div>
                             <div id="overviewContactLinks" style="display:flex;gap:6px;"></div>
                         </div>
 
-                        <!-- Tabs: Active Services vs Complete Ledger -->
+                        <!-- Tabs: 1. Monthly Accounting History, 2. Active Products, 3. Payment Remarks -->
                         <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
-                            <ul class="nav nav-tabs" style="background:#f1f5f9;padding:8px 12px 0 12px;border-bottom:1px solid #e2e8f0;">
-                                <li class="active"><a href="#csmOverviewTabServices" data-toggle="tab" style="font-weight:700;font-size:13px;"><i class="fas fa-cubes text-primary"></i> Active Products &amp; Services (<span id="overviewTabServiceCount">0</span>)</a></li>
-                                <li><a href="#csmOverviewTabLedger" data-toggle="tab" style="font-weight:700;font-size:13px;"><i class="fas fa-history text-success"></i> Payment Ledger &amp; Remarks History (<span id="overviewTabNotesCount">0</span>)</a></li>
+                            <ul class="nav nav-tabs" style="background:#f1f5f9;padding:8px 12px 0 12px;border-bottom:1px solid #e2e8f0;" id="csmOverviewModalTabs">
+                                <li class="active"><a href="#csmOverviewTabHistory" data-toggle="tab" style="font-weight:700;font-size:13px;"><i class="fas fa-calendar-days text-primary"></i> Monthly Accounting History &amp; Ledgers</a></li>
+                                <li><a href="#csmOverviewTabServices" data-toggle="tab" style="font-weight:700;font-size:13px;"><i class="fas fa-cubes text-info"></i> Active Products &amp; Services (<span id="overviewTabServiceCount">0</span>)</a></li>
+                                <li><a href="#csmOverviewTabLedger" data-toggle="tab" style="font-weight:700;font-size:13px;"><i class="fas fa-history text-success"></i> Payment Remarks &amp; Audit Logs (<span id="overviewTabNotesCount">0</span>)</a></li>
                             </ul>
                             <div class="tab-content" style="padding:16px;">
-                                <div class="tab-pane active" id="csmOverviewTabServices">
+                                <!-- Tab 1: Month-by-Month Accounting History -->
+                                <div class="tab-pane active" id="csmOverviewTabHistory">
+                                    <div id="overviewHistoryLoading" style="text-align:center;padding:25px;color:#0f5ea8;">
+                                        <i class="fas fa-spinner fa-spin fa-2x"></i>
+                                        <p style="margin-top:6px;font-weight:700;">Loading monthly accounting ledgers...</p>
+                                    </div>
+                                    <div id="overviewHistoryContainer" style="display:none;">
+                                        <!-- All Time Summary Totals -->
+                                        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px 16px;margin-bottom:14px;display:flex;gap:20px;flex-wrap:wrap;font-size:12.5px;">
+                                            <div>All-Time Total Billed: <strong id="overviewHistTotalBilled" style="color:#7c3aed;">৳ 0.00</strong></div>
+                                            <div>All-Time Total Paid: <strong id="overviewHistTotalPaid" style="color:#16a34a;">৳ 0.00</strong></div>
+                                            <div>All-Time Outstanding Due: <strong id="overviewHistTotalDue" style="color:#dc2626;">৳ 0.00</strong></div>
+                                        </div>
+                                        <div style="overflow-x:auto;">
+                                            <table class="table table-bordered table-striped" style="margin-bottom:0;font-size:12.5px;">
+                                                <thead style="background:#f8fafc;">
+                                                    <tr>
+                                                        <th>Billing Month</th>
+                                                        <th>Total Target Bill</th>
+                                                        <th>Paid Amount</th>
+                                                        <th>Remaining Due</th>
+                                                        <th>Status</th>
+                                                        <th>Pay Date</th>
+                                                        <th>Remarks / Notes</th>
+                                                        <th class="text-center" width="80">Action</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody id="overviewHistoryTableBody">
+                                                    <tr><td colspan="8" class="text-center text-muted">No monthly records</td></tr>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Tab 2: Products & Services -->
+                                <div class="tab-pane" id="csmOverviewTabServices">
                                     <div style="overflow-x:auto;">
                                         <table class="table table-bordered table-striped" style="margin-bottom:0;font-size:12.5px;">
                                             <thead style="background:#f8fafc;">
@@ -2437,10 +2678,12 @@ if (!function_exists('csm_render_custom_customers_page')) {
                                         </table>
                                     </div>
                                 </div>
+
+                                <!-- Tab 3: Remarks Timeline -->
                                 <div class="tab-pane" id="csmOverviewTabLedger">
                                     <div id="overviewLedgerLoading" style="text-align:center;padding:25px;color:#64748b;">
                                         <i class="fas fa-spinner fa-spin fa-2x"></i>
-                                        <p style="margin-top:6px;">Loading payment ledger history...</p>
+                                        <p style="margin-top:6px;">Loading payment remarks...</p>
                                     </div>
                                     <div id="overviewLedgerList" style="display:none;max-height:280px;overflow-y:auto;"></div>
                                 </div>
@@ -2461,6 +2704,8 @@ if (!function_exists('csm_render_custom_customers_page')) {
         var CSM_CLIENTS_DATA = ' . ($csmClientsJson ?: '{}') . ';
         var CSM_CURR_PREFIX = "' . addslashes($currPrefix) . '";
         var CSM_CURR_SUFFIX = "' . addslashes($currSuffix) . '";
+        var CSM_SELECTED_MONTH = "' . addslashes($selectedMonth) . '";
+        var CSM_SELECTED_MONTH_NAME = "' . addslashes($selectedMonthName) . '";
         var CSM_CURR_MONTH = "' . date('F Y') . '";
         var CSM_NOTE_URL = CSM_MODULE_LINK + "&ajax=save_note";
         var CSM_EDIT_NOTE_URL = CSM_MODULE_LINK + "&ajax=edit_note";
@@ -3274,53 +3519,116 @@ if (!function_exists('csm_render_custom_customers_page')) {
             });
         };
 
-        // Client Due Modal & Ajax (with Bill Pay Date support)
-        window.openEditClientDueModal = function(groupKey, currentAmount, currentNote, clientName, currentPaidDate, currentStatus) {
+        // Dynamic Calculation inside Due & Accounting Modal
+        window.csmRecalculateDue = function() {
+            var rec = parseFloat($("#modalDueTotalRecurringInput").val()) || 0;
+            var paid = parseFloat($("#modalDuePaidAmountInput").val()) || 0;
+            var due = Math.max(0, rec - paid);
+            $("#modalDueAmountInput").val(due.toFixed(2));
+
+            if (rec > 0 || paid > 0) {
+                if (due <= 0 && paid > 0) {
+                    $("#modalDueStatusInput").val("paid");
+                } else if (paid > 0 && due > 0) {
+                    $("#modalDueStatusInput").val("partial");
+                } else {
+                    $("#modalDueStatusInput").val("unpaid");
+                }
+            }
+        };
+
+        window.csmFillFullPaid = function() {
+            var rec = parseFloat($("#modalDueTotalRecurringInput").val()) || 0;
+            $("#modalDuePaidAmountInput").val(rec.toFixed(2));
+            $("#modalDueAmountInput").val("0.00");
+            $("#modalDueStatusInput").val("paid");
+        };
+
+        window.csmFillZeroPaid = function() {
+            var rec = parseFloat($("#modalDueTotalRecurringInput").val()) || 0;
+            $("#modalDuePaidAmountInput").val("0.00");
+            $("#modalDueAmountInput").val(rec.toFixed(2));
+            $("#modalDueStatusInput").val("unpaid");
+        };
+
+        // Client Due Modal & Ajax (Full Month Ledger Support)
+        window.openEditClientDueModal = function(groupKey, recurring, paid, due, note, clientName, paidDate, status, payDay, month) {
+            month = month || window.CSM_SELECTED_MONTH || "";
             $("#modalDueGroupKey").val(groupKey);
             $("#modalDueClientName").text(clientName || "Corporate Client");
-            $("#modalDueAmountInput").val(currentAmount !== undefined ? currentAmount : "0.00");
-            $("#modalDueStatusInput").val(currentStatus || (parseFloat(currentAmount) > 0 ? "unpaid" : "paid"));
-            $("#modalDuePaidDateInput").val(currentPaidDate || "");
-            $("#modalDueNoteInput").val(currentNote || "");
-            $("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due &amp; Date");
+            $("#modalDueBillingMonthInput").val(month);
+            $("#modalDueBillingMonthBadge").text(month ? "Month: " + month : "Current Month");
+
+            var recVal = (recurring !== undefined && recurring !== null) ? parseFloat(recurring) : 0;
+            var paidVal = (paid !== undefined && paid !== null) ? parseFloat(paid) : 0;
+            var dueVal = (due !== undefined && due !== null) ? parseFloat(due) : Math.max(0, recVal - paidVal);
+
+            $("#modalDueTotalRecurringInput").val(recVal > 0 ? recVal.toFixed(2) : "0.00");
+            $("#modalDuePaidAmountInput").val(paidVal > 0 ? paidVal.toFixed(2) : "0.00");
+            $("#modalDueAmountInput").val(dueVal.toFixed(2));
+
+            var stVal = status || (dueVal <= 0 && paidVal > 0 ? "paid" : (paidVal > 0 ? "partial" : "unpaid"));
+            $("#modalDueStatusInput").val(stVal.toLowerCase());
+
+            $("#modalDuePaidDateInput").val(paidDate || "");
+            $("#modalDueMonthlyPayDayInput").val(payDay ? String(payDay) : "");
+            $("#modalDueNoteInput").val(note || "");
+
+            $("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Ledger Entry");
             $("#csmClientDueModal").modal("show");
         };
 
         window.csmSaveClientDueAjax = function() {
             var groupKey = $("#modalDueGroupKey").val();
-            var amount = $("#modalDueAmountInput").val() || "0.00";
+            var month = $("#modalDueBillingMonthInput").val() || "";
+            var totalRecurring = $("#modalDueTotalRecurringInput").val() || "0.00";
+            var paidAmount = $("#modalDuePaidAmountInput").val() || "0.00";
+            var dueAmount = $("#modalDueAmountInput").val() || "0.00";
             var status = $("#modalDueStatusInput").val() || "unpaid";
             var paidDate = $("#modalDuePaidDateInput").val() || "";
+            var payDay = $("#modalDueMonthlyPayDayInput").val() || "";
             var note = $("#modalDueNoteInput").val().trim();
+
             $("#btnSaveDueAjax").prop("disabled", true).html("<i class=\'fas fa-spinner fa-spin\'></i> Saving...");
 
             $.ajax({
                 url: CSM_MODULE_LINK + "&ajax=save_client_due",
                 type: "POST",
-                data: { group_key: groupKey, due_amount: amount, paid_status: status, last_paid_date: paidDate, due_note: note },
+                data: {
+                    group_key: groupKey,
+                    billing_month: month,
+                    total_recurring: totalRecurring,
+                    paid_amount: paidAmount,
+                    due_amount: dueAmount,
+                    paid_status: status,
+                    pay_date: paidDate,
+                    monthly_pay_day: payDay,
+                    due_note: note
+                },
                 dataType: "json",
                 success: function(res) {
-                    $("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due &amp; Date");
+                    $("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Ledger Entry");
                     if (res && res.success) {
                         $("#csmClientDueModal").modal("hide");
                         if (typeof Swal !== "undefined") {
-                            const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 2000 });
-                            Toast.fire({ icon: "success", title: "Custom due & Bill Pay Date updated" });
+                            const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 1500 });
+                            Toast.fire({ icon: "success", title: "Monthly accounting ledger updated!" });
                         }
-                        setTimeout(function() { window.location.reload(); }, 700);
+                        setTimeout(function() { window.location.reload(); }, 600);
                     } else {
-                        alert(res.error || "Failed to save due note");
+                        alert(res.error || "Failed to save ledger entry");
                     }
                 },
                 error: function() {
-                    $("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due &amp; Date");
-                    alert("Network error saving due note");
+                    $("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Ledger Entry");
+                    alert("Network error saving ledger entry");
                 }
             });
         };
 
         // Quick Mark Paid
-        window.csmQuickMarkPaid = function(groupKey, clientName) {
+        window.csmQuickMarkPaid = function(groupKey, clientName, recurring, month) {
+            month = month || window.CSM_SELECTED_MONTH || "";
             function doMarkPaid() {
                 var $btn = $("#btnPaid_" + groupKey);
                 $btn.prop("disabled", true).html("<i class=\'fas fa-spinner fa-spin\'></i>");
@@ -3328,16 +3636,21 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 $.ajax({
                     url: CSM_MODULE_LINK + "&ajax=quick_mark_paid",
                     type: "POST",
-                    data: { group_key: groupKey },
+                    data: {
+                        group_key: groupKey,
+                        billing_month: month,
+                        total_recurring: recurring || 0,
+                        paid_date: new Date().toISOString().split("T")[0]
+                    },
                     dataType: "json",
                     success: function(res) {
                         $btn.prop("disabled", false).html("<i class=\'fas fa-check\'></i> Paid");
                         if (res && res.success) {
                             if (typeof Swal !== "undefined") {
-                                const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 2500 });
-                                Toast.fire({ icon: "success", title: "Marked as Paid successfully!" });
+                                const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 1500 });
+                                Toast.fire({ icon: "success", title: "Marked as Paid successfully for " + (month || "this month") });
                             }
-                            setTimeout(function() { window.location.reload(); }, 700);
+                            setTimeout(function() { window.location.reload(); }, 600);
                         } else {
                             alert(res.error || "Failed to mark paid");
                         }
@@ -3352,7 +3665,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
             if (typeof Swal !== "undefined") {
                 Swal.fire({
                     title: "Confirm Bill Payment?",
-                    text: "Mark all custom dues as Paid for " + clientName + " for today?",
+                    text: "Mark all dues as 100% Paid for " + clientName + " for " + (month || "this month") + "?",
                     icon: "question",
                     showCancelButton: true,
                     confirmButtonColor: "#16a34a",
@@ -3364,7 +3677,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     }
                 });
             } else {
-                if (confirm("Mark all custom dues as Paid for " + clientName + " for today?")) {
+                if (confirm("Mark all dues as Paid for " + clientName + " for " + (month || "this month") + "?")) {
                     doMarkPaid();
                 }
             }
@@ -3381,15 +3694,17 @@ if (!function_exists('csm_render_custom_customers_page')) {
             var uId = parseInt(cl.userid, 10);
             var name = cl.client_name || "Client";
             var alias = cl.custom_alias || "";
-            var due = parseFloat(cl.custom_due_amount || 0);
-            var dueNote = cl.custom_due_note || "";
-            var lastPaid = cl.last_paid_date || "";
-            var paidStatus = cl.paid_status || (due > 0 ? "unpaid" : "paid");
-            var totalRecurring = parseFloat(cl.total_recurring || 0);
+            var recurring = parseFloat(cl.month_recurring || cl.total_recurring || 0);
+            var paid = parseFloat(cl.month_paid || 0);
+            var due = parseFloat(cl.month_due || cl.custom_due_amount || 0);
+            var dueNote = cl.month_notes || cl.custom_due_note || "";
+            var payDate = cl.month_pay_date || cl.last_paid_date || "";
+            var payDay = parseInt(cl.month_pay_day || cl.monthly_pay_day || 0, 10);
+            var paidStatus = (cl.month_status || cl.paid_status || (due > 0 ? "unpaid" : "paid")).toLowerCase();
             var items = cl.items || [];
             var currPfx = window.CSM_CURR_PREFIX || "৳ ";
             var currSfx = window.CSM_CURR_SUFFIX || "";
-            var isUnpaid = (due > 0 || paidStatus.toLowerCase() !== "paid");
+            var isUnpaid = (due > 0 || paidStatus !== "paid");
 
             var titleHtml = alias 
                 ? "<i class=\"fas fa-id-badge text-warning\"></i> " + $("<div>").text(alias).html() + " <small style=\"color:#e0f2fe;font-size:13.5px;font-weight:normal;\">(" + $("<div>").text(name).html() + ")</small>" 
@@ -3416,7 +3731,21 @@ if (!function_exists('csm_render_custom_customers_page')) {
             }
             $("#overviewContactLinks").html(contactIcons);
 
-            // 1. Due Card
+            // 1. Target Recurring Card
+            $("#overviewRecurringTotal").text(currPfx + recurring.toFixed(2) + currSfx);
+            $("#overviewProductsCount").text(items.length + " Monitored Items");
+
+            // 2. Paid Amount Card
+            $("#overviewMonthPaidAmount").text(currPfx + paid.toFixed(2) + currSfx);
+            if (paidStatus === "paid") {
+                $("#overviewMonthStatusBadge").html("<span class=\"label label-success\"><i class=\"fas fa-check\"></i> Paid (" + window.CSM_SELECTED_MONTH_NAME + ")</span>");
+            } else if (paidStatus === "partial") {
+                $("#overviewMonthStatusBadge").html("<span class=\"label label-warning\"><i class=\"fas fa-half-stroke\"></i> Partial (" + window.CSM_SELECTED_MONTH_NAME + ")</span>");
+            } else {
+                $("#overviewMonthStatusBadge").html("<span class=\"label label-danger\"><i class=\"fas fa-xmark\"></i> Unpaid (" + window.CSM_SELECTED_MONTH_NAME + ")</span>");
+            }
+
+            // 3. Due Amount Card
             if (due > 0) {
                 $("#overviewDueAmount").css("color", "#dc2626").html("<i class=\"fas fa-circle-exclamation\"></i> " + currPfx + due.toFixed(2) + currSfx);
             } else {
@@ -3424,39 +3753,27 @@ if (!function_exists('csm_render_custom_customers_page')) {
             }
             $("#overviewDueNoteSnippet").text(dueNote || "No remarks");
 
-            // 2. Month Status Card
-            var monthName = window.CSM_CURR_MONTH || "Current Month";
-            if (isUnpaid) {
-                $("#overviewMonthStatus").css("color", "#dc2626").html("<i class=\"fas fa-circle-xmark\"></i> Unpaid");
-                $("#overviewMonthSub").text(monthName + " Pending");
-            } else {
-                $("#overviewMonthStatus").css("color", "#16a34a").html("<i class=\"fas fa-circle-check\"></i> Paid");
-                $("#overviewMonthSub").text(monthName + " Cleared");
-            }
-
-            // 3. Bill Pay Date Card
-            if (lastPaid && lastPaid !== "0000-00-00") {
-                $("#overviewBillPayDate").text(lastPaid);
-                if (!isUnpaid) {
-                    $("#overviewBillPayBadge").html("<span class=\"label label-success\"><i class=\"fas fa-check\"></i> Paid Cleared</span>");
-                } else {
-                    $("#overviewBillPayBadge").html("<span class=\"label label-warning\"><i class=\"fas fa-calendar-alt\"></i> Expected Pay Date</span>");
+            // 4. Bill Pay Date Card
+            if (payDate && payDate !== "0000-00-00") {
+                $("#overviewBillPayDate").text(payDate);
+                var pBadge = (!isUnpaid) 
+                    ? "<span class=\"label label-success\"><i class=\"fas fa-check\"></i> Paid Cleared</span>" 
+                    : "<span class=\"label label-warning\"><i class=\"fas fa-calendar-alt\"></i> Pay Date</span>";
+                if (payDay) {
+                    pBadge += " <small class=\"text-muted\" style=\"margin-left:4px;\">Fixed: " + payDay + "th</small>";
                 }
+                $("#overviewBillPayBadge").html(pBadge);
             } else {
-                $("#overviewBillPayDate").text("Not Set");
-                $("#overviewBillPayBadge").html("<span class=\"label label-default\">Click Edit Due to set</span>");
+                $("#overviewBillPayDate").text(payDay ? "Every " + payDay + "th" : "Not Set");
+                $("#overviewBillPayBadge").html(payDay ? "<span class=\"label label-info\">Fixed Monthly Day</span>" : "<span class=\"label label-default\">Click Edit to set</span>");
             }
-
-            // 4. Recurring Total Card
-            $("#overviewRecurringTotal").text(currPfx + totalRecurring.toFixed(2) + currSfx);
-            $("#overviewProductsCount").text(items.length + " Monitored Items");
 
             // Modal Button Actions
             $("#overviewBtnPaid").off("click").on("click", function() {
-                csmQuickMarkPaid(groupKey, name);
+                csmQuickMarkPaid(groupKey, name, recurring, window.CSM_SELECTED_MONTH);
             });
             $("#overviewBtnEditDue").off("click").on("click", function() {
-                openEditClientDueModal(groupKey, due, dueNote, name, lastPaid, paidStatus);
+                openEditClientDueModal(groupKey, recurring, paid, due, dueNote, name, payDate, paidStatus, payDay, window.CSM_SELECTED_MONTH);
             });
             $("#overviewBtnEditAlias").off("click").on("click", function() {
                 openEditClientAliasModal(groupKey, alias, name);
@@ -3465,7 +3782,10 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 openNoteModal((isWhmcs ? "service" : "custom_customer"), (isWhmcs ? uId : parseInt(groupKey.replace("offline_", ""), 10)), name + (alias ? " (" + alias + ")" : ""), due);
             });
 
-            // Tab 1: Products Table
+            // Tab 1: Monthly Accounting History
+            loadClientOverviewMonthlyHistory(groupKey);
+
+            // Tab 2: Products Table
             $("#overviewTabServiceCount").text(items.length);
             if (items.length === 0) {
                 $("#overviewServicesTableBody").html("<tr><td colspan=\"7\" class=\"text-center text-muted\" style=\"padding:25px;\">No active services configured for this client.</td></tr>");
@@ -3486,10 +3806,102 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 $("#overviewServicesTableBody").html(sHtml);
             }
 
-            // Tab 2: Ledger History
+            // Tab 3: Remarks History
             loadClientOverviewLedger(groupKey, (isWhmcs ? "service" : "custom_customer"), (isWhmcs ? uId : parseInt(groupKey.replace("offline_", ""), 10)));
 
+            // Activate Tab 1 by default
+            $(\'#csmOverviewModalTabs a[href="#csmOverviewTabHistory"]\').tab("show");
+
             $("#csmClientOverviewModal").modal("show");
+        };
+
+        window.CSM_HISTORY_CACHE = {};
+
+        // Load Month-by-Month History in Overview Modal
+        function loadClientOverviewMonthlyHistory(groupKey) {
+            $("#overviewHistoryLoading").show();
+            $("#overviewHistoryContainer").hide();
+
+            $.ajax({
+                url: CSM_MODULE_LINK + "&ajax=get_client_monthly_history&group_key=" + encodeURIComponent(groupKey),
+                type: "GET",
+                dataType: "json",
+                success: function(res) {
+                    $("#overviewHistoryLoading").hide();
+                    if (res && res.success && res.history && res.history.length > 0) {
+                        window.CSM_HISTORY_CACHE[groupKey] = res.history;
+                        var histHtml = "";
+                        var totalAllBilled = 0;
+                        var totalAllPaid = 0;
+                        var totalAllDue = 0;
+
+                        res.history.forEach(function(h, idx) {
+                            var rec = parseFloat(h.total_recurring || 0);
+                            var paid = parseFloat(h.paid_amount || 0);
+                            var due = parseFloat(h.due_amount || 0);
+                            var st = (h.status || "unpaid").toLowerCase();
+                            var pDate = h.pay_date || "—";
+                            var nts = h.notes || "—";
+
+                            totalAllBilled += rec;
+                            totalAllPaid += paid;
+                            totalAllDue += due;
+
+                            var stBadge = st === "paid" 
+                                ? "<span class=\"label label-success\"><i class=\"fas fa-check\"></i> Paid</span>" 
+                                : (st === "partial" 
+                                    ? "<span class=\"label label-warning\"><i class=\"fas fa-circle-half-stroke\"></i> Partial</span>" 
+                                    : "<span class=\"label label-danger\"><i class=\"fas fa-xmark\"></i> Unpaid</span>");
+
+                            histHtml += "<tr>" +
+                                "<td><strong style=\"color:#0f5ea8;font-size:13px;\">" + h.billing_month + "</strong></td>" +
+                                "<td><strong>" + window.CSM_CURR_PREFIX + rec.toFixed(2) + window.CSM_CURR_SUFFIX + "</strong></td>" +
+                                "<td style=\"color:#16a34a;font-weight:700;\">" + window.CSM_CURR_PREFIX + paid.toFixed(2) + window.CSM_CURR_SUFFIX + "</td>" +
+                                "<td style=\"color:#dc2626;font-weight:700;\">" + window.CSM_CURR_PREFIX + due.toFixed(2) + window.CSM_CURR_SUFFIX + "</td>" +
+                                "<td>" + stBadge + "</td>" +
+                                "<td>" + pDate + (h.monthly_pay_day ? "<br><small class=\"text-muted\">Fixed: " + h.monthly_pay_day + "th</small>" : "") + "</td>" +
+                                "<td style=\"max-width:200px;word-break:break-word;\"><small>" + $("<div>").text(nts).html() + "</small></td>" +
+                                "<td class=\"text-center\"><button type=\"button\" class=\"btn btn-default btn-xs\" onclick=\"csmEditHistoryByIndex(\'" + groupKey + "\', " + idx + ")\"><i class=\"fas fa-pen-to-square text-primary\"></i> Edit</button></td>" +
+                            "</tr>";
+                        });
+
+                        $("#overviewHistTotalBilled").text(window.CSM_CURR_PREFIX + totalAllBilled.toFixed(2) + window.CSM_CURR_SUFFIX);
+                        $("#overviewHistTotalPaid").text(window.CSM_CURR_PREFIX + totalAllPaid.toFixed(2) + window.CSM_CURR_SUFFIX);
+                        $("#overviewHistTotalDue").text(window.CSM_CURR_PREFIX + totalAllDue.toFixed(2) + window.CSM_CURR_SUFFIX);
+
+                        $("#overviewHistoryTableBody").html(histHtml);
+                        $("#overviewHistoryContainer").show();
+                    } else {
+                        $("#overviewHistoryTableBody").html("<tr><td colspan=\"8\" class=\"text-center text-muted\" style=\"padding:25px;\">No monthly ledger records found for this client yet. Once you enter or mark paid, records will appear here.</td></tr>");
+                        $("#overviewHistoryContainer").show();
+                    }
+                },
+                error: function() {
+                    $("#overviewHistoryLoading").hide();
+                    $("#overviewHistoryTableBody").html("<tr><td colspan=\"8\" class=\"text-center text-danger\" style=\"padding:20px;\">Failed to load monthly history.</td></tr>");
+                    $("#overviewHistoryContainer").show();
+                }
+            });
+        }
+
+        window.csmEditHistoryByIndex = function(groupKey, index) {
+            if (!window.CSM_HISTORY_CACHE || !window.CSM_HISTORY_CACHE[groupKey] || !window.CSM_HISTORY_CACHE[groupKey][index]) {
+                return;
+            }
+            var h = window.CSM_HISTORY_CACHE[groupKey][index];
+            var clientName = (window.CSM_CLIENTS_DATA && window.CSM_CLIENTS_DATA[groupKey]) ? window.CSM_CLIENTS_DATA[groupKey].client_name : "";
+            openEditClientDueModal(
+                groupKey,
+                parseFloat(h.total_recurring || 0),
+                parseFloat(h.paid_amount || 0),
+                parseFloat(h.due_amount || 0),
+                h.notes || "",
+                clientName,
+                h.pay_date || "",
+                h.status || "unpaid",
+                parseInt(h.monthly_pay_day || 0, 10),
+                h.billing_month
+            );
         };
 
         function loadClientOverviewLedger(groupKey, relType, relId) {
@@ -4137,22 +4549,87 @@ if (!function_exists('client_services_monitor_output')) {
             exit;
         }
 
-        // AJAX Save Custom Due Note / Amount / Bill Pay Date
+        // AJAX Save Custom Due Note / Amount / Bill Pay Date & Monthly Ledger
         if (isset($_GET['ajax']) && $_GET['ajax'] === 'save_client_due' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             while (ob_get_level() > 0) { ob_end_clean(); }
             header('Content-Type: application/json');
             $groupKey = trim($_POST['group_key'] ?? '');
-            $amount = isset($_POST['due_amount']) ? (float)$_POST['due_amount'] : 0.00;
-            $note = trim($_POST['due_note'] ?? '');
-            $paidDate = !empty($_POST['last_paid_date']) ? trim($_POST['last_paid_date']) : (!empty($_POST['paid_date']) ? trim($_POST['paid_date']) : null);
-            $status = !empty($_POST['paid_status']) ? trim($_POST['paid_status']) : ($amount > 0 ? 'unpaid' : 'paid');
-            $now = date('Y-m-d H:i:s');
+            $month = !empty($_POST['billing_month']) ? trim($_POST['billing_month']) : date('Y-m');
+            $totalRecurring = isset($_POST['total_recurring']) ? (float)$_POST['total_recurring'] : 0.00;
+            $paidAmount = isset($_POST['paid_amount']) ? (float)$_POST['paid_amount'] : 0.00;
+            $dueAmount = isset($_POST['due_amount']) ? (float)$_POST['due_amount'] : max(0.00, $totalRecurring - $paidAmount);
+            $note = trim($_POST['due_note'] ?? ($_POST['notes'] ?? ''));
+            $paidDate = !empty($_POST['last_paid_date']) ? trim($_POST['last_paid_date']) : (!empty($_POST['pay_date']) ? trim($_POST['pay_date']) : null);
+            $payDay = !empty($_POST['monthly_pay_day']) ? (int)$_POST['monthly_pay_day'] : null;
+            
+            // Derive Status
+            $status = !empty($_POST['paid_status']) ? strtolower(trim($_POST['paid_status'])) : '';
+            if (empty($status) || $status === 'auto') {
+                if ($dueAmount <= 0 && ($paidAmount > 0 || $totalRecurring > 0)) {
+                    $status = 'paid';
+                } elseif ($paidAmount > 0 && $dueAmount > 0) {
+                    $status = 'partial';
+                } else {
+                    $status = ($dueAmount > 0) ? 'unpaid' : 'paid';
+                }
+            }
 
+            $now = date('Y-m-d H:i:s');
+            $adminName = isset($_SESSION['adminname']) ? $_SESSION['adminname'] : 'Admin';
+            $adminId = isset($_SESSION['adminid']) ? (int)$_SESSION['adminid'] : 0;
+
+            if (empty($groupKey)) {
+                echo json_encode(['success' => false, 'error' => 'Invalid client key']);
+                exit;
+            }
+
+            // 1. Upsert into Monthly Ledgers Table
+            try {
+                $ledgerExists = Capsule::table('mod_csm_monthly_ledgers')
+                    ->where('group_key', $groupKey)
+                    ->where('billing_month', $month)
+                    ->first();
+
+                if ($ledgerExists) {
+                    Capsule::table('mod_csm_monthly_ledgers')
+                        ->where('id', $ledgerExists->id)
+                        ->update([
+                            'total_recurring' => $totalRecurring,
+                            'paid_amount'     => $paidAmount,
+                            'due_amount'      => $dueAmount,
+                            'status'          => $status,
+                            'pay_date'        => $paidDate,
+                            'monthly_pay_day' => $payDay,
+                            'notes'           => $note,
+                            'admin_id'        => $adminId,
+                            'admin_name'      => $adminName,
+                            'updated_at'      => $now,
+                        ]);
+                } else {
+                    Capsule::table('mod_csm_monthly_ledgers')->insert([
+                        'group_key'       => $groupKey,
+                        'billing_month'   => $month,
+                        'total_recurring' => $totalRecurring,
+                        'paid_amount'     => $paidAmount,
+                        'due_amount'      => $dueAmount,
+                        'status'          => $status,
+                        'pay_date'        => $paidDate,
+                        'monthly_pay_day' => $payDay,
+                        'notes'           => $note,
+                        'admin_id'        => $adminId,
+                        'admin_name'      => $adminName,
+                        'created_at'      => $now,
+                        'updated_at'      => $now,
+                    ]);
+                }
+            } catch (\Exception $e) {}
+
+            // 2. Sync Current Master Client Record if this is the current active month
             if (strpos($groupKey, 'client_') === 0) {
                 $uId = (int)str_replace('client_', '', $groupKey);
                 if ($uId > 0) {
                     $upData = [
-                        'custom_due_amount' => $amount,
+                        'custom_due_amount' => $dueAmount,
                         'custom_due_note'   => $note,
                         'paid_status'       => $status,
                         'updated_at'        => $now,
@@ -4160,18 +4637,38 @@ if (!function_exists('client_services_monitor_output')) {
                     if ($paidDate !== null) {
                         $upData['last_paid_date'] = $paidDate;
                     }
+                    if ($payDay !== null) {
+                        $upData['monthly_pay_day'] = $payDay;
+                    }
                     Capsule::table('mod_csm_monitored_clients')->updateOrInsert(
                         ['userid' => $uId],
                         $upData
                     );
-                    echo json_encode(['success' => true]);
+
+                    // Add to notes log for audit history
+                    if (!empty($note) || $paidAmount > 0) {
+                        Capsule::table('mod_csm_service_notes')->insert([
+                            'rel_type'    => 'service',
+                            'rel_id'      => $uId,
+                            'note'        => '[' . date('M Y', strtotime($month . '-01')) . ' Ledger] ' . ($note ?: 'Updated monthly dues'),
+                            'paid_amount' => $paidAmount,
+                            'due_amount'  => $dueAmount,
+                            'promised_date' => $paidDate,
+                            'admin_id'    => $adminId,
+                            'admin_name'  => $adminName,
+                            'created_at'  => $now,
+                            'updated_at'  => $now
+                        ]);
+                    }
+
+                    echo json_encode(['success' => true, 'month' => $month, 'status' => $status, 'due' => $dueAmount, 'paid' => $paidAmount]);
                     exit;
                 }
             } elseif (strpos($groupKey, 'offline_') === 0) {
                 $cId = (int)str_replace('offline_', '', $groupKey);
                 if ($cId > 0) {
                     $upData = [
-                        'amount'          => $amount,
+                        'amount'          => $dueAmount,
                         'custom_due_note' => $note,
                         'status'          => ($status === 'paid' ? 'Paid' : 'Active'),
                         'updated_at'      => $now,
@@ -4179,8 +4676,28 @@ if (!function_exists('client_services_monitor_output')) {
                     if ($paidDate !== null) {
                         $upData['last_paid_date'] = $paidDate;
                     }
+                    if ($payDay !== null) {
+                        $upData['monthly_pay_day'] = $payDay;
+                    }
                     Capsule::table('mod_csm_custom_customers')->where('id', $cId)->update($upData);
-                    echo json_encode(['success' => true]);
+
+                    // Add to notes log
+                    if (!empty($note) || $paidAmount > 0) {
+                        Capsule::table('mod_csm_service_notes')->insert([
+                            'rel_type'    => 'custom_customer',
+                            'rel_id'      => $cId,
+                            'note'        => '[' . date('M Y', strtotime($month . '-01')) . ' Ledger] ' . ($note ?: 'Updated monthly dues'),
+                            'paid_amount' => $paidAmount,
+                            'due_amount'  => $dueAmount,
+                            'promised_date' => $paidDate,
+                            'admin_id'    => $adminId,
+                            'admin_name'  => $adminName,
+                            'created_at'  => $now,
+                            'updated_at'  => $now
+                        ]);
+                    }
+
+                    echo json_encode(['success' => true, 'month' => $month, 'status' => $status, 'due' => $dueAmount, 'paid' => $paidAmount]);
                     exit;
                 }
             }
@@ -4188,17 +4705,29 @@ if (!function_exists('client_services_monitor_output')) {
             exit;
         }
 
-        // AJAX Quick Mark Paid
+        // AJAX Quick Mark Paid (Monthly Ledger aware)
         if (isset($_GET['ajax']) && $_GET['ajax'] === 'quick_mark_paid' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             while (ob_get_level() > 0) { ob_end_clean(); }
             header('Content-Type: application/json');
             $groupKey = trim($_POST['group_key'] ?? '');
+            $month = !empty($_POST['billing_month']) ? trim($_POST['billing_month']) : date('Y-m');
             $paidDate = !empty($_POST['paid_date']) ? trim($_POST['paid_date']) : date('Y-m-d');
             $now = date('Y-m-d H:i:s');
+            $adminName = isset($_SESSION['adminname']) ? $_SESSION['adminname'] : 'Admin';
+            $adminId = isset($_SESSION['adminid']) ? (int)$_SESSION['adminid'] : 0;
+
+            // Find recurring amount for this client
+            $recAmount = 0.00;
+            if (isset($_POST['total_recurring'])) {
+                $recAmount = (float)$_POST['total_recurring'];
+            }
 
             if (strpos($groupKey, 'client_') === 0) {
                 $uId = (int)str_replace('client_', '', $groupKey);
                 if ($uId > 0) {
+                    if ($recAmount <= 0) {
+                        $recAmount = (float)Capsule::table('tblhosting')->where('userid', $uId)->where('domainstatus', 'Active')->sum('amount');
+                    }
                     Capsule::table('mod_csm_monitored_clients')->updateOrInsert(
                         ['userid' => $uId],
                         [
@@ -4208,36 +4737,129 @@ if (!function_exists('client_services_monitor_output')) {
                             'updated_at'        => $now
                         ]
                     );
-                    $adminName = isset($_SESSION['adminname']) ? $_SESSION['adminname'] : 'Admin';
-                    $adminId = isset($_SESSION['adminid']) ? (int)$_SESSION['adminid'] : 0;
+
+                    // Update or insert monthly ledger
+                    try {
+                        $ledgerExists = Capsule::table('mod_csm_monthly_ledgers')->where('group_key', $groupKey)->where('billing_month', $month)->first();
+                        if ($ledgerExists) {
+                            $rec = $recAmount > 0 ? $recAmount : (float)$ledgerExists->total_recurring;
+                            Capsule::table('mod_csm_monthly_ledgers')->where('id', $ledgerExists->id)->update([
+                                'total_recurring' => $rec,
+                                'paid_amount'     => $rec,
+                                'due_amount'      => 0.00,
+                                'status'          => 'paid',
+                                'pay_date'        => $paidDate,
+                                'admin_id'        => $adminId,
+                                'admin_name'      => $adminName,
+                                'updated_at'      => $now
+                            ]);
+                        } else {
+                            Capsule::table('mod_csm_monthly_ledgers')->insert([
+                                'group_key'       => $groupKey,
+                                'billing_month'   => $month,
+                                'total_recurring' => $recAmount,
+                                'paid_amount'     => $recAmount,
+                                'due_amount'      => 0.00,
+                                'status'          => 'paid',
+                                'pay_date'        => $paidDate,
+                                'notes'           => 'Marked as fully Paid for ' . date('F Y', strtotime($month . '-01')),
+                                'admin_id'        => $adminId,
+                                'admin_name'      => $adminName,
+                                'created_at'      => $now,
+                                'updated_at'      => $now
+                            ]);
+                        }
+                    } catch (\Exception $e) {}
+
                     Capsule::table('mod_csm_service_notes')->insert([
                         'rel_type'    => 'service',
                         'rel_id'      => $uId,
-                        'note'        => 'Bill Paid confirmed on ' . date('d/m/Y', strtotime($paidDate)),
-                        'paid_amount' => 0.00,
+                        'note'        => '[' . date('M Y', strtotime($month . '-01')) . '] Bill Paid confirmed (' . number_format($recAmount, 2) . ') on ' . date('d/m/Y', strtotime($paidDate)),
+                        'paid_amount' => $recAmount,
                         'due_amount'  => 0.00,
                         'admin_id'    => $adminId,
                         'admin_name'  => $adminName,
                         'created_at'  => $now,
                         'updated_at'  => $now
                     ]);
-                    echo json_encode(['success' => true, 'paid_date' => date('d/m/Y', strtotime($paidDate))]);
+                    echo json_encode(['success' => true, 'paid_date' => date('d/m/Y', strtotime($paidDate)), 'month' => $month]);
                     exit;
                 }
             } elseif (strpos($groupKey, 'offline_') === 0) {
                 $cId = (int)str_replace('offline_', '', $groupKey);
                 if ($cId > 0) {
+                    $cust = Capsule::table('mod_csm_custom_customers')->where('id', $cId)->first();
+                    $rec = $cust ? (float)$cust->amount : $recAmount;
                     Capsule::table('mod_csm_custom_customers')->where('id', $cId)->update([
                         'amount'          => 0.00,
                         'last_paid_date'  => $paidDate,
                         'status'          => 'Paid',
                         'updated_at'      => $now
                     ]);
-                    echo json_encode(['success' => true, 'paid_date' => date('d/m/Y', strtotime($paidDate))]);
+
+                    // Monthly ledger update
+                    try {
+                        $ledgerExists = Capsule::table('mod_csm_monthly_ledgers')->where('group_key', $groupKey)->where('billing_month', $month)->first();
+                        if ($ledgerExists) {
+                            Capsule::table('mod_csm_monthly_ledgers')->where('id', $ledgerExists->id)->update([
+                                'paid_amount'     => $rec,
+                                'due_amount'      => 0.00,
+                                'status'          => 'paid',
+                                'pay_date'        => $paidDate,
+                                'admin_id'        => $adminId,
+                                'admin_name'      => $adminName,
+                                'updated_at'      => $now
+                            ]);
+                        } else {
+                            Capsule::table('mod_csm_monthly_ledgers')->insert([
+                                'group_key'       => $groupKey,
+                                'billing_month'   => $month,
+                                'total_recurring' => $rec,
+                                'paid_amount'     => $rec,
+                                'due_amount'      => 0.00,
+                                'status'          => 'paid',
+                                'pay_date'        => $paidDate,
+                                'notes'           => 'Marked as fully Paid for ' . date('F Y', strtotime($month . '-01')),
+                                'admin_id'        => $adminId,
+                                'admin_name'      => $adminName,
+                                'created_at'      => $now,
+                                'updated_at'      => $now
+                            ]);
+                        }
+                    } catch (\Exception $e) {}
+
+                    echo json_encode(['success' => true, 'paid_date' => date('d/m/Y', strtotime($paidDate)), 'month' => $month]);
                     exit;
                 }
             }
             echo json_encode(['success' => false, 'error' => 'Invalid client key']);
+            exit;
+        }
+
+        // AJAX Fetch Client Complete Monthly History
+        if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_client_monthly_history') {
+            while (ob_get_level() > 0) { ob_end_clean(); }
+            header('Content-Type: application/json');
+            $groupKey = trim($_GET['group_key'] ?? '');
+            if (empty($groupKey)) {
+                echo json_encode(['success' => false, 'error' => 'Invalid client key']);
+                exit;
+            }
+
+            try {
+                $ledgers = Capsule::table('mod_csm_monthly_ledgers')
+                    ->where('group_key', $groupKey)
+                    ->orderBy('billing_month', 'DESC')
+                    ->get();
+
+                echo json_encode([
+                    'success' => true,
+                    'group_key' => $groupKey,
+                    'history' => $ledgers
+                ]);
+            } catch (\Exception $e) {
+                echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+            }
             exit;
         }
 
