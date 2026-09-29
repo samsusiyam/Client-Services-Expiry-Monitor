@@ -3052,49 +3052,51 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     }
                 }
             });
+        };
+
         // Filter Panel Toggle
         window.csmToggleFilterPanel = function() {
-            var \$panel = \$("#csmFilterPanel");
-            if (\$panel.is(":visible")) {
-                \$panel.slideUp(180);
-                \$("#csmToggleFilterText").text("Show Search & Filters");
-                \$("#csmToggleFilterBtn").removeClass("btn-primary").addClass("btn-default");
+            var $panel = $("#csmFilterPanel");
+            if ($panel.is(":visible")) {
+                $panel.slideUp(180);
+                $("#csmToggleFilterText").text("Show Search & Filters");
+                $("#csmToggleFilterBtn").removeClass("btn-primary").addClass("btn-default");
             } else {
-                \$panel.slideDown(180);
-                \$("#csmToggleFilterText").text("Hide Search & Filters");
-                \$("#csmToggleFilterBtn").removeClass("btn-default").addClass("btn-primary");
+                $panel.slideDown(180);
+                $("#csmToggleFilterText").text("Hide Search & Filters");
+                $("#csmToggleFilterBtn").removeClass("btn-default").addClass("btn-primary");
             }
         };
 
         // Client Alias Modal & Ajax
         window.openEditClientAliasModal = function(groupKey, currentAlias, clientName) {
-            \$("#modalAliasGroupKey").val(groupKey);
-            \$("#modalAliasClientName").text(clientName || "Corporate Client");
-            \$("#modalAliasInput").val(currentAlias || "");
-            \$("#btnSaveAliasAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Alias");
-            \$("#csmClientAliasModal").modal("show");
+            $("#modalAliasGroupKey").val(groupKey);
+            $("#modalAliasClientName").text(clientName || "Corporate Client");
+            $("#modalAliasInput").val(currentAlias || "");
+            $("#btnSaveAliasAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Alias");
+            $("#csmClientAliasModal").modal("show");
         };
 
         window.csmSaveClientAliasAjax = function() {
-            var groupKey = \$("#modalAliasGroupKey").val();
-            var alias = \$("#modalAliasInput").val().trim();
-            \$("#btnSaveAliasAjax").prop("disabled", true).html("<i class=\'fas fa-spinner fa-spin\'></i> Saving...");
+            var groupKey = $("#modalAliasGroupKey").val();
+            var alias = $("#modalAliasInput").val().trim();
+            $("#btnSaveAliasAjax").prop("disabled", true).html("<i class=\'fas fa-spinner fa-spin\'></i> Saving...");
 
-            \$.ajax({
+            $.ajax({
                 url: CSM_MODULE_LINK + "&ajax=save_client_alias",
                 type: "POST",
                 data: { group_key: groupKey, alias: alias },
                 dataType: "json",
                 success: function(res) {
-                    \$("#btnSaveAliasAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Alias");
+                    $("#btnSaveAliasAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Alias");
                     if (res && res.success) {
-                        \$("#csmClientAliasModal").modal("hide");
-                        var \$tag = \$("#csmAliasTag_" + groupKey);
+                        $("#csmClientAliasModal").modal("hide");
+                        var $tag = $("#csmAliasTag_" + groupKey);
                         if (alias) {
-                            \$tag.css({"background": "#fef3c7", "color": "#92400e", "border": "1px solid #fde68a"})
-                                .html(\'<i class="fas fa-id-badge text-warning"></i> <span class="csm-alias-val">\' + \$("<div>").text(alias).html() + \'</span> <i class="fas fa-pen" style="font-size:9px;opacity:0.6;"></i>\');
+                            $tag.css({"background": "#fef3c7", "color": "#92400e", "border": "1px solid #fde68a"})
+                                .html(\'<i class="fas fa-id-badge text-warning"></i> <span class="csm-alias-val">\' + $("<div>").text(alias).html() + \'</span> <i class="fas fa-pen" style="font-size:9px;opacity:0.6;"></i>\');
                         } else {
-                            \$tag.css({"background": "#f1f5f9", "color": "#64748b", "border": "1px dashed #cbd5e1"})
+                            $tag.css({"background": "#f1f5f9", "color": "#64748b", "border": "1px dashed #cbd5e1"})
                                 .html(\'<i class="fas fa-plus text-primary"></i> <span class="csm-alias-val">Set Custom Name</span>\');
                         }
                         if (typeof Swal !== "undefined") {
@@ -3106,7 +3108,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     }
                 },
                 error: function() {
-                    \$("#btnSaveAliasAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Alias");
+                    $("#btnSaveAliasAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Alias");
                     alert("Network error saving alias");
                 }
             });
@@ -3114,30 +3116,30 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
         // Client Due Modal & Ajax
         window.openEditClientDueModal = function(groupKey, currentAmount, currentNote, clientName) {
-            \$("#modalDueGroupKey").val(groupKey);
-            \$("#modalDueClientName").text(clientName || "Corporate Client");
-            \$("#modalDueAmountInput").val(currentAmount || "0.00");
-            \$("#modalDueStatusInput").val(parseFloat(currentAmount) > 0 ? "unpaid" : "paid");
-            \$("#modalDueNoteInput").val(currentNote || "");
-            \$("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due Note");
-            \$("#csmClientDueModal").modal("show");
+            $("#modalDueGroupKey").val(groupKey);
+            $("#modalDueClientName").text(clientName || "Corporate Client");
+            $("#modalDueAmountInput").val(currentAmount || "0.00");
+            $("#modalDueStatusInput").val(parseFloat(currentAmount) > 0 ? "unpaid" : "paid");
+            $("#modalDueNoteInput").val(currentNote || "");
+            $("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due Note");
+            $("#csmClientDueModal").modal("show");
         };
 
         window.csmSaveClientDueAjax = function() {
-            var groupKey = \$("#modalDueGroupKey").val();
-            var amount = \$("#modalDueAmountInput").val() || "0.00";
-            var note = \$("#modalDueNoteInput").val().trim();
-            \$("#btnSaveDueAjax").prop("disabled", true).html("<i class=\'fas fa-spinner fa-spin\'></i> Saving...");
+            var groupKey = $("#modalDueGroupKey").val();
+            var amount = $("#modalDueAmountInput").val() || "0.00";
+            var note = $("#modalDueNoteInput").val().trim();
+            $("#btnSaveDueAjax").prop("disabled", true).html("<i class=\'fas fa-spinner fa-spin\'></i> Saving...");
 
-            \$.ajax({
+            $.ajax({
                 url: CSM_MODULE_LINK + "&ajax=save_client_due",
                 type: "POST",
                 data: { group_key: groupKey, due_amount: amount, due_note: note },
                 dataType: "json",
                 success: function(res) {
-                    \$("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due Note");
+                    $("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due Note");
                     if (res && res.success) {
-                        \$("#csmClientDueModal").modal("hide");
+                        $("#csmClientDueModal").modal("hide");
                         if (typeof Swal !== "undefined") {
                             const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 2000 });
                             Toast.fire({ icon: "success", title: "Custom due note updated" });
@@ -3148,7 +3150,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     }
                 },
                 error: function() {
-                    \$("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due Note");
+                    $("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due Note");
                     alert("Network error saving due note");
                 }
             });
@@ -3157,16 +3159,16 @@ if (!function_exists('csm_render_custom_customers_page')) {
         // Quick Mark Paid
         window.csmQuickMarkPaid = function(groupKey, clientName) {
             function doMarkPaid() {
-                var \$btn = \$("#btnPaid_" + groupKey);
-                \$btn.prop("disabled", true).html("<i class=\'fas fa-spinner fa-spin\'></i>");
+                var $btn = $("#btnPaid_" + groupKey);
+                $btn.prop("disabled", true).html("<i class=\'fas fa-spinner fa-spin\'></i>");
 
-                \$.ajax({
+                $.ajax({
                     url: CSM_MODULE_LINK + "&ajax=quick_mark_paid",
                     type: "POST",
                     data: { group_key: groupKey },
                     dataType: "json",
                     success: function(res) {
-                        \$btn.prop("disabled", false).html("<i class=\'fas fa-check\'></i> Paid");
+                        $btn.prop("disabled", false).html("<i class=\'fas fa-check\'></i> Paid");
                         if (res && res.success) {
                             if (typeof Swal !== "undefined") {
                                 const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 2500 });
@@ -3178,7 +3180,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                         }
                     },
                     error: function() {
-                        \$btn.prop("disabled", false).html("<i class=\'fas fa-check\'></i> Paid");
+                        $btn.prop("disabled", false).html("<i class=\'fas fa-check\'></i> Paid");
                         alert("Network error");
                     }
                 });
