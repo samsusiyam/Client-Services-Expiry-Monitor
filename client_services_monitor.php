@@ -1175,7 +1175,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 $customDueAmount = $mRow ? (float)$mRow->custom_due_amount : 0.00;
                 $customDueNote = $mRow && !empty($mRow->custom_due_note) ? $mRow->custom_due_note : '';
                 $lastPaidDate = $mRow && !empty($mRow->last_paid_date) && $mRow->last_paid_date !== '0000-00-00' ? $mRow->last_paid_date : '';
-                $paidStatus = $mRow && !empty($mRow->paid_status) ? $mRow->paid_status : ($customDueAmount > 0 ? 'unpaid' : 'paid');
+                $monthlyPayDay = ($mRow && !empty($mRow->monthly_pay_day)) ? (int)$mRow->monthly_pay_day : null;
 
                 $clientGroups[$key] = [
                     'group_key'         => $key,
@@ -1192,6 +1192,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     'custom_due_amount' => $customDueAmount,
                     'custom_due_note'   => $customDueNote,
                     'last_paid_date'    => $lastPaidDate,
+                    'monthly_pay_day'   => $monthlyPayDay,
                     'paid_status'       => $paidStatus,
                     'items'             => [],
                     'unpaid_inv_due'    => $clientUnpaidInvoices[$mc->id]['total_due'] ?? 0.00,
@@ -1294,6 +1295,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 $customDueNote = !empty($cust->custom_due_note) ? $cust->custom_due_note : (!empty($cust->notes) ? $cust->notes : '');
                 $lastPaidDate = !empty($cust->last_paid_date) && $cust->last_paid_date !== '0000-00-00' ? $cust->last_paid_date : '';
                 $paidStatus = !empty($cust->status) ? strtolower($cust->status) : ($customDueAmount > 0 ? 'unpaid' : 'paid');
+                $customMonthlyPayDay = !empty($cust->monthly_pay_day) ? (int)$cust->monthly_pay_day : null;
 
                 $clientGroups[$key] = [
                     'group_key'         => $key,
@@ -1310,6 +1312,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     'custom_due_amount' => $customDueAmount,
                     'custom_due_note'   => $customDueNote,
                     'last_paid_date'    => $lastPaidDate,
+                    'monthly_pay_day'   => $customMonthlyPayDay,
                     'paid_status'       => $paidStatus,
                     'items'             => [
                         [
@@ -1418,32 +1421,42 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
             // Resolve Monthly Ledger for Selected Month
             $key = $grp['group_key'];
+            $maxDaysInMonth = (int)date('t', $selectedMonthTs);
             if (isset($monthlyLedgers[$key])) {
                 $mLedger = $monthlyLedgers[$key];
                 $grp['month_recurring'] = (float)$mLedger->total_recurring;
                 $grp['month_paid'] = (float)$mLedger->paid_amount;
                 $grp['month_due'] = (float)$mLedger->due_amount;
                 $grp['month_status'] = strtolower($mLedger->status ?: ($grp['month_due'] > 0 ? 'unpaid' : 'paid'));
-                $grp['month_pay_date'] = $mLedger->pay_date ?: '';
                 $grp['month_pay_day'] = !empty($mLedger->monthly_pay_day) ? (int)$mLedger->monthly_pay_day : ($grp['monthly_pay_day'] ?? null);
+                if (!empty($mLedger->pay_date) && $mLedger->pay_date !== '0000-00-00') {
+                    $grp['month_pay_date'] = $mLedger->pay_date;
+                } elseif (!empty($grp['month_pay_day'])) {
+                    $calcDay = min((int)$grp['month_pay_day'], $maxDaysInMonth);
+                    $grp['month_pay_date'] = $selectedMonth . '-' . str_pad($calcDay, 2, '0', STR_PAD_LEFT);
+                } else {
+                    $grp['month_pay_date'] = '';
+                }
                 $grp['month_notes'] = $mLedger->notes ?: '';
             } else {
-                // Default month values
+                // Default month values for future or previous months
                 $grp['month_recurring'] = $grp['total_recurring'];
+                $grp['month_pay_day'] = $grp['monthly_pay_day'] ?? null;
+                $calcDay = !empty($grp['month_pay_day']) ? min((int)$grp['month_pay_day'], $maxDaysInMonth) : null;
+                $autoPayDate = $calcDay ? ($selectedMonth . '-' . str_pad($calcDay, 2, '0', STR_PAD_LEFT)) : '';
+
                 if ($isCurrentMonth) {
                     $hasLegacyDue = ((float)$grp['custom_due_amount'] > 0);
                     $grp['month_due'] = $hasLegacyDue ? (float)$grp['custom_due_amount'] : (float)$grp['total_recurring'];
                     $grp['month_paid'] = ($grp['paid_status'] === 'paid' && !$hasLegacyDue) ? (float)$grp['total_recurring'] : 0.00;
                     $grp['month_status'] = ($grp['month_paid'] >= $grp['month_recurring'] && $grp['month_recurring'] > 0) ? 'paid' : ($grp['month_due'] > 0 ? 'unpaid' : 'paid');
-                    $grp['month_pay_date'] = $grp['last_paid_date'] ?: (!empty($grp['monthly_pay_day']) ? ($selectedMonth . '-' . str_pad($grp['monthly_pay_day'], 2, '0', STR_PAD_LEFT)) : '');
-                    $grp['month_pay_day'] = $grp['monthly_pay_day'] ?? null;
+                    $grp['month_pay_date'] = $autoPayDate ?: ($grp['last_paid_date'] ?: '');
                     $grp['month_notes'] = $grp['custom_due_note'] ?: '';
                 } else {
                     $grp['month_paid'] = 0.00;
                     $grp['month_due'] = (float)$grp['total_recurring'];
                     $grp['month_status'] = ($grp['month_due'] > 0 ? 'unpaid' : 'paid');
-                    $grp['month_pay_date'] = !empty($grp['monthly_pay_day']) ? ($selectedMonth . '-' . str_pad($grp['monthly_pay_day'], 2, '0', STR_PAD_LEFT)) : '';
-                    $grp['month_pay_day'] = $grp['monthly_pay_day'] ?? null;
+                    $grp['month_pay_date'] = $autoPayDate;
                     $grp['month_notes'] = '';
                 }
             }
