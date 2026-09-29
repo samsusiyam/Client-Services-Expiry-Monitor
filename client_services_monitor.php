@@ -2514,9 +2514,12 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
                         <!-- Bill Pay Date Settings (Monthly Fixed Day vs Specific Date) -->
                         <div style="background:#ffffff;border:1px solid #dce6f2;border-radius:8px;padding:14px 16px;margin-bottom:16px;">
-                            <h5 style="margin:0 0 10px 0;font-weight:800;color:#0f5ea8;font-size:13px;border-bottom:1px solid #f1f5f9;padding-bottom:5px;">
-                                <i class="fas fa-calendar-check"></i> Bill Pay Date Rules
-                            </h5>
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;border-bottom:1px solid #f1f5f9;padding-bottom:5px;">
+                                <h5 style="margin:0;font-weight:800;color:#0f5ea8;font-size:13px;">
+                                    <i class="fas fa-calendar-check"></i> Bill Pay Date Rules
+                                </h5>
+                                <button type="button" class="btn btn-default btn-xs" onclick="csmResetModalDates()" style="font-size:11px;color:#dc2626;font-weight:700;" title="Clear and Reset all bill pay dates for this client"><i class="fas fa-calendar-xmark"></i> Clear / Reset Dates</button>
+                            </div>
                             <div class="row">
                                 <div class="col-md-6 form-group" style="margin-bottom:6px;">
                                     <label style="font-weight:700;color:#334155;font-size:12px;"><i class="fas fa-repeat text-primary"></i> Monthly Fixed Pay Day:</label>
@@ -2527,7 +2530,12 @@ if (!function_exists('csm_render_custom_customers_page')) {
                                 </div>
                                 <div class="col-md-6 form-group" style="margin-bottom:6px;">
                                     <label style="font-weight:700;color:#334155;font-size:12px;"><i class="fas fa-calendar-day text-info"></i> Specific Month Pay Date:</label>
-                                    <input type="date" id="modalDuePaidDateInput" class="form-control input-sm">
+                                    <div class="input-group input-group-sm">
+                                        <input type="date" id="modalDuePaidDateInput" class="form-control">
+                                        <span class="input-group-btn">
+                                            <button type="button" class="btn btn-default" onclick="$(\'#modalDuePaidDateInput\').val(\'\');" title="Clear specific date"><i class="fas fa-times text-danger"></i></button>
+                                        </span>
+                                    </div>
                                     <small class="text-muted" style="font-size:10.5px;display:block;margin-top:2px;">Custom date override for this specific month.</small>
                                 </div>
                             </div>
@@ -3627,6 +3635,11 @@ if (!function_exists('csm_render_custom_customers_page')) {
             $("#modalDueStatusInput").val("unpaid");
         };
 
+        window.csmResetModalDates = function() {
+            $("#modalDuePaidDateInput").val("");
+            $("#modalDueMonthlyPayDayInput").val("");
+        };
+
         // Client Due Modal & Ajax (Full Month Ledger Support)
         window.openEditClientDueModal = function(groupKey, recurring, paid, due, note, clientName, paidDate, status, payDay, month) {
             month = month || window.CSM_SELECTED_MONTH || "";
@@ -4635,8 +4648,10 @@ if (!function_exists('client_services_monitor_output')) {
             $paidAmount = isset($_POST['paid_amount']) ? (float)$_POST['paid_amount'] : 0.00;
             $dueAmount = isset($_POST['due_amount']) ? (float)$_POST['due_amount'] : max(0.00, $totalRecurring - $paidAmount);
             $note = trim($_POST['due_note'] ?? ($_POST['notes'] ?? ''));
-            $paidDate = !empty($_POST['last_paid_date']) ? trim($_POST['last_paid_date']) : (!empty($_POST['pay_date']) ? trim($_POST['pay_date']) : null);
-            $payDay = !empty($_POST['monthly_pay_day']) ? (int)$_POST['monthly_pay_day'] : null;
+            $rawPaidDate = isset($_POST['pay_date']) ? trim($_POST['pay_date']) : (isset($_POST['last_paid_date']) ? trim($_POST['last_paid_date']) : '');
+            $paidDate = (!empty($rawPaidDate) && $rawPaidDate !== '0000-00-00') ? $rawPaidDate : null;
+            $rawPayDay = isset($_POST['monthly_pay_day']) ? trim($_POST['monthly_pay_day']) : '';
+            $payDay = (!empty($rawPayDay) && is_numeric($rawPayDay) && (int)$rawPayDay > 0) ? (int)$rawPayDay : null;
             
             // Derive Status
             $status = !empty($_POST['paid_status']) ? strtolower(trim($_POST['paid_status'])) : '';
@@ -4700,7 +4715,7 @@ if (!function_exists('client_services_monitor_output')) {
                 }
             } catch (\Exception $e) {}
 
-            // 2. Sync Current Master Client Record if this is the current active month
+            // 2. Sync Current Master Client Record
             if (strpos($groupKey, 'client_') === 0) {
                 $uId = (int)str_replace('client_', '', $groupKey);
                 if ($uId > 0) {
@@ -4708,14 +4723,10 @@ if (!function_exists('client_services_monitor_output')) {
                         'custom_due_amount' => $dueAmount,
                         'custom_due_note'   => $note,
                         'paid_status'       => $status,
+                        'last_paid_date'    => $paidDate,
+                        'monthly_pay_day'   => $payDay,
                         'updated_at'        => $now,
                     ];
-                    if ($paidDate !== null) {
-                        $upData['last_paid_date'] = $paidDate;
-                    }
-                    if ($payDay !== null) {
-                        $upData['monthly_pay_day'] = $payDay;
-                    }
                     Capsule::table('mod_csm_monitored_clients')->updateOrInsert(
                         ['userid' => $uId],
                         $upData
@@ -4744,17 +4755,13 @@ if (!function_exists('client_services_monitor_output')) {
                 $cId = (int)str_replace('offline_', '', $groupKey);
                 if ($cId > 0) {
                     $upData = [
-                        'amount'          => $dueAmount,
-                        'custom_due_note' => $note,
-                        'status'          => ($status === 'paid' ? 'Paid' : 'Active'),
-                        'updated_at'      => $now,
+                        'amount'            => $dueAmount,
+                        'custom_due_note'   => $note,
+                        'status'            => ($status === 'paid' ? 'Paid' : 'Active'),
+                        'last_paid_date'    => $paidDate,
+                        'monthly_pay_day'   => $payDay,
+                        'updated_at'        => $now,
                     ];
-                    if ($paidDate !== null) {
-                        $upData['last_paid_date'] = $paidDate;
-                    }
-                    if ($payDay !== null) {
-                        $upData['monthly_pay_day'] = $payDay;
-                    }
                     Capsule::table('mod_csm_custom_customers')->where('id', $cId)->update($upData);
 
                     // Add to notes log
