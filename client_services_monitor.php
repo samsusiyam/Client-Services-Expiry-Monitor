@@ -1504,16 +1504,24 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
         // Month Navigation Toolbar Bar
         $html .= '<div class="csm-month-navigator" style="background:#ffffff;border:1px solid #dce6f2;border-radius:10px;padding:14px 20px;margin-bottom:18px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;box-shadow:0 4px 14px rgba(15,23,42,0.04);">
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                 <span style="font-size:13px;font-weight:800;color:#0f5ea8;text-transform:uppercase;letter-spacing:0.5px;">
                     <i class="fas fa-calendar-days"></i> Billing Month:
                 </span>
-                <div class="btn-group" role="group">
-                    <a href="' . $moduleLink . '&action=custom_customers&month=' . $prevMonth . '" class="btn btn-default btn-sm" title="Previous Month (' . date('M Y', strtotime($prevMonth . '-01')) . ')"><i class="fas fa-chevron-left"></i> Prev</a>
-                    <select id="csmMonthJumpSelect" onchange="window.location.href=\'' . $moduleLink . '&action=custom_customers&month=\'+this.value;" class="btn btn-default btn-sm" style="font-weight:700;color:#0f5ea8;border-left:0;border-right:0;height:30px;padding:3px 10px;background:#f8fafc;outline:none;">
-                        ' . $monthSelectOptions . '
-                    </select>
-                    <a href="' . $moduleLink . '&action=custom_customers&month=' . $nextMonth . '" class="btn btn-default btn-sm" title="Next Month (' . date('M Y', strtotime($nextMonth . '-01')) . ')">Next <i class="fas fa-chevron-right"></i></a>
+                <div style="display:inline-flex;align-items:center;background:#ffffff;border:1.5px solid #cbd5e1;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.04);height:36px;">
+                    <a href="' . $moduleLink . '&action=custom_customers&month=' . $prevMonth . '" style="display:inline-flex;align-items:center;gap:5px;padding:0 14px;height:100%;background:#f8fafc;color:#334155;font-weight:700;font-size:12.5px;text-decoration:none;border-right:1.5px solid #cbd5e1;border-top-left-radius:6px;border-bottom-left-radius:6px;transition:all 0.15s ease;" onmouseover="this.style.background=\'#e2e8f0\';this.style.color=\'#0f5ea8\';" onmouseout="this.style.background=\'#f8fafc\';this.style.color=\'#334155\';" title="Previous Month (' . date('M Y', strtotime($prevMonth . '-01')) . ')">
+                        <i class="fas fa-chevron-left" style="font-size:11px;"></i> Prev
+                    </a>
+                    <div style="position:relative;display:inline-flex;align-items:center;height:100%;background:#ffffff;">
+                        <i class="fas fa-calendar-alt" style="position:absolute;left:12px;color:#0f5ea8;font-size:13px;pointer-events:none;z-index:1;"></i>
+                        <select id="csmMonthJumpSelect" onchange="window.location.href=\'' . $moduleLink . '&action=custom_customers&month=\'+this.value;" style="appearance:none;-webkit-appearance:none;-moz-appearance:none;height:100%;border:none;background:transparent;padding:0 30px 0 34px;font-size:13.5px;font-weight:800;color:#0f5ea8;cursor:pointer;outline:none;text-align:center;">
+                            ' . $monthSelectOptions . '
+                        </select>
+                        <i class="fas fa-chevron-down" style="position:absolute;right:10px;color:#64748b;font-size:10px;pointer-events:none;z-index:1;"></i>
+                    </div>
+                    <a href="' . $moduleLink . '&action=custom_customers&month=' . $nextMonth . '" style="display:inline-flex;align-items:center;gap:5px;padding:0 14px;height:100%;background:#f8fafc;color:#334155;font-weight:700;font-size:12.5px;text-decoration:none;border-left:1.5px solid #cbd5e1;border-top-right-radius:6px;border-bottom-right-radius:6px;transition:all 0.15s ease;" onmouseover="this.style.background=\'#e2e8f0\';this.style.color=\'#0f5ea8\';" onmouseout="this.style.background=\'#f8fafc\';this.style.color=\'#334155\';" title="Next Month (' . date('M Y', strtotime($nextMonth . '-01')) . ')">
+                        Next <i class="fas fa-chevron-right" style="font-size:11px;"></i>
+                    </a>
                 </div>
                 ' . ($isCurrentMonth ? '<span class="badge" style="background:#16a34a;color:#fff;font-size:11px;font-weight:700;padding:5px 9px;"><i class="fas fa-clock"></i> Current Active Month</span>' : '<a href="' . $moduleLink . '&action=custom_customers" class="btn btn-warning btn-xs" style="font-weight:700;"><i class="fas fa-arrow-rotate-left"></i> Jump to Current Month</a>') . '
             </div>
