@@ -2837,6 +2837,16 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 }
                 applyCustomMonitorFilters();
             });
+
+            // Auto-sync Monthly Fixed Pay Day with Specific Month Pay Date in Due Modal
+            $("#modalDueMonthlyPayDayInput").on("change", function() {
+                var day = $(this).val();
+                var month = $("#modalDueBillingMonthInput").val() || window.CSM_SELECTED_MONTH || new Date().toISOString().substring(0, 7);
+                if (day && parseInt(day, 10) > 0) {
+                    var dayStr = String(day).length < 2 ? "0" + String(day) : String(day);
+                    $("#modalDuePaidDateInput").val(month + "-" + dayStr);
+                }
+            });
         });
 
         // Expand / Collapse Client Products Toggle
