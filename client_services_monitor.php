@@ -1632,24 +1632,40 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 $waBtn = !empty($waUrl) ? '<a href="' . csm_h($waUrl) . '" target="_blank" class="btn btn-success btn-xs" title="WhatsApp Reminder"><i class="fab fa-whatsapp"></i></a>' : '';
                 $copyBtn = !empty($cleanDisplayPhone) ? '<button type="button" class="btn btn-default btn-xs" onclick="csmCopyText(\'' . csm_h(addslashes($cleanDisplayPhone)) . '\')" title="Copy Phone"><i class="far fa-copy"></i></button>' : '';
 
-                // Client info & Custom Alias Badge
+                // Client info & Custom Alias Badge (prominent, no company or email, this month bill status)
+                $customAlias = $grp['custom_alias'];
                 $clientLink = '';
                 if ($isWhmcs && $userId > 0) {
-                    $clientLink = '<a href="clientssummary.php?userid=' . $userId . '" target="_blank" style="font-weight:800;color:#0f5ea8;font-size:13.5px;"><i class="fas fa-user-circle"></i> ' . csm_h($grp['client_name']) . '</a>';
+                    $clientLink = '<a href="clientssummary.php?userid=' . $userId . '" target="_blank" onclick="event.stopPropagation();" style="font-weight:700;color:#0f5ea8;font-size:12.5px;"><i class="fas fa-user-circle"></i> ' . csm_h($grp['client_name']) . '</a>';
                 } else {
-                    $clientLink = '<strong style="color:#1e293b;font-size:13.5px;"><i class="fas fa-user-tag"></i> ' . csm_h($grp['client_name']) . '</strong> <span class="label label-default" style="font-size:10px;">Offline</span>';
+                    $clientLink = '<strong style="color:#475569;font-size:12.5px;"><i class="fas fa-user-tag"></i> ' . csm_h($grp['client_name']) . '</strong> <span class="label label-default" style="font-size:9px;">Offline</span>';
                 }
 
-                $customAlias = $grp['custom_alias'];
                 $aliasBadgeHtml = '';
                 if (!empty($customAlias)) {
-                    $aliasBadgeHtml = '<span id="csmAliasTag_' . $key . '" onclick="event.stopPropagation(); openEditClientAliasModal(\'' . $key . '\', \'' . csm_h(addslashes($customAlias)) . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\')" style="cursor:pointer;display:inline-flex;align-items:center;gap:5px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:2px 8px;border-radius:6px;font-size:11.5px;font-weight:700;margin-top:4px;" title="Click to edit custom nickname / alias">'
-                        . '<i class="fas fa-id-badge text-warning"></i> <span class="csm-alias-val">' . csm_h($customAlias) . '</span> <i class="fas fa-pen" style="font-size:9px;opacity:0.6;"></i>'
-                        . '</span>';
+                    $aliasBadgeHtml = '<div style="margin-bottom:3px;"><span id="csmAliasTag_' . $key . '" onclick="event.stopPropagation(); openEditClientAliasModal(\'' . $key . '\', \'' . csm_h(addslashes($customAlias)) . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\')" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;background:#fef3c7;color:#92400e;border:1.5px solid #fde68a;padding:4px 10px;border-radius:6px;font-size:15px;font-weight:800;box-shadow:0 1px 3px rgba(0,0,0,0.04);" title="Click to edit custom nickname / alias">'
+                        . '<i class="fas fa-id-badge text-warning" style="font-size:14px;"></i> <span class="csm-alias-val">' . csm_h($customAlias) . '</span> <i class="fas fa-pen" style="font-size:10px;opacity:0.6;"></i>'
+                        . '</span></div>';
                 } else {
-                    $aliasBadgeHtml = '<span id="csmAliasTag_' . $key . '" onclick="event.stopPropagation(); openEditClientAliasModal(\'' . $key . '\', \'\', \'' . csm_h(addslashes($grp['client_name'])) . '\')" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;background:#f1f5f9;color:#64748b;border:1px dashed #cbd5e1;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;margin-top:4px;" title="Set a custom alias or known nickname">'
+                    $aliasBadgeHtml = '<div style="margin-bottom:3px;"><span id="csmAliasTag_' . $key . '" onclick="event.stopPropagation(); openEditClientAliasModal(\'' . $key . '\', \'\', \'' . csm_h(addslashes($grp['client_name'])) . '\')" style="cursor:pointer;display:inline-flex;align-items:center;gap:5px;background:#f1f5f9;color:#64748b;border:1px dashed #cbd5e1;padding:3px 10px;border-radius:6px;font-size:12.5px;font-weight:700;" title="Set a custom alias or known nickname">'
                         . '<i class="fas fa-plus text-primary"></i> <span class="csm-alias-val">Set Custom Name</span>'
-                        . '</span>';
+                        . '</span></div>';
+                }
+
+                // Month Bill Status Badge
+                $monthName = date('F');
+                $monthStatusBadge = '';
+                if ($isUnpaid) {
+                    $monthStatusBadge = '<span class="label label-danger" style="font-size:10.5px;font-weight:700;padding:2px 7px;display:inline-block;margin-top:3px;"><i class="fas fa-circle-xmark"></i> ' . $monthName . ': Unpaid</span>';
+                } else {
+                    $monthStatusBadge = '<span class="label label-success" style="font-size:10.5px;font-weight:700;padding:2px 7px;display:inline-block;margin-top:3px;"><i class="fas fa-circle-check"></i> ' . $monthName . ': Paid</span>';
+                }
+
+                $clientContactCell = '';
+                if (!empty($customAlias)) {
+                    $clientContactCell = $aliasBadgeHtml . '<div style="font-size:12px;color:#64748b;margin-top:2px;">WHMCS: ' . $clientLink . '</div><div>' . $monthStatusBadge . '</div>';
+                } else {
+                    $clientContactCell = '<div style="font-size:14.5px;font-weight:800;color:#1e293b;margin-bottom:3px;">' . $clientLink . '</div>' . $aliasBadgeHtml . '<div>' . $monthStatusBadge . '</div>';
                 }
 
                 // Custom Due Note Column display
@@ -1706,9 +1722,9 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 // Quick Mark Paid Action Button
                 $paidBtn = '<button type="button" class="btn btn-success btn-sm" id="btnPaid_' . $key . '" onclick="event.stopPropagation(); csmQuickMarkPaid(\'' . $key . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\')" style="font-weight:700;border-radius:6px;padding:5px 12px;" title="Mark Paid and Clear Due"><i class="fas fa-check"></i> Paid</button>';
 
-                // Client Row Action Shortcuts
+                // Client Row Action Shortcuts (No dologin, added Overview button)
+                $overviewBtn = '<button type="button" class="btn btn-primary btn-sm" onclick="event.stopPropagation(); openClientOverviewModal(\'' . $key . '\')" style="font-weight:700;background:#0f5ea8;border-color:#0f5ea8;color:#fff;" title="View Complete Client Overview &amp; Ledger"><i class="fas fa-chart-pie"></i> Overview</button> ';
                 $whmcsSummaryBtn = ($isWhmcs && $userId > 0) ? '<a href="clientssummary.php?userid=' . $userId . '" target="_blank" class="btn btn-default btn-sm" title="View WHMCS Client Profile"><i class="fas fa-user-check text-primary"></i></a> ' : '';
-                $loginClientBtn = ($isWhmcs && $userId > 0) ? '<a href="dologin.php?userid=' . $userId . '" target="_blank" class="btn btn-default btn-sm" title="Login as Client in Client Area"><i class="fas fa-right-to-bracket text-info"></i></a> ' : '';
                 $configureScopeBtn = ($isWhmcs && $userId > 0) ? '<button type="button" class="btn btn-default btn-sm" onclick="openConfigureClientModal(' . $userId . ')" title="Configure Monitored Services &amp; Scope"><i class="fas fa-sliders text-warning"></i></button> ' : '';
                 $removeClientBtn = '';
                 if ($isWhmcs && $userId > 0) {
@@ -1738,7 +1754,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     }
                 }
 
-                $searchCorpus = strtolower($userId . ' ' . $grp['client_name'] . ' ' . $customAlias . ' ' . $customDueNote . ' ' . $grp['company'] . ' ' . $grp['email'] . ' ' . $cleanDisplayPhone . ' ' . $digitsPhone . ' ' . implode(' ', $childSearchTerms));
+                $searchCorpus = strtolower($userId . ' ' . $grp['client_name'] . ' ' . $customAlias . ' ' . $customDueNote . ' ' . $cleanDisplayPhone . ' ' . $digitsPhone . ' ' . implode(' ', $childSearchTerms));
                 $productTypesStr = implode(',', array_unique($childProductTypes));
                 $billingCyclesStr = implode(',', array_unique($childBillingCycles));
                 $serverIdsStr = implode(',', array_unique($childServerIds));
@@ -1761,10 +1777,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                         <strong>' . ($isWhmcs ? '#' . $userId : '<span class="label label-default">Offline</span>') . '</strong>
                     </td>
                     <td onclick="csmToggleClientRow(\'' . $key . '\')">
-                        ' . $clientLink . '
-                        ' . ($grp['company'] ? '<br><small class="text-muted"><i class="fas fa-building"></i> ' . csm_h($grp['company']) . '</small>' : '') . '
-                        ' . ($grp['email'] ? '<br><small><a href="mailto:' . csm_h($grp['email']) . '" onclick="event.stopPropagation()" style="color:#64748b;"><i class="fas fa-envelope"></i> ' . csm_h($grp['email']) . '</a></small>' : '') . '
-                        <div style="margin-top:2px;">' . $aliasBadgeHtml . '</div>
+                        ' . $clientContactCell . '
                     </td>
                     <td>
                         <div style="font-size:12px;font-weight:700;color:#1e293b;">' . csm_h($cleanDisplayPhone ?: 'N/A') . '</div>
@@ -1791,11 +1804,11 @@ if (!function_exists('csm_render_custom_customers_page')) {
                         ' . $paidBtn . '
                     </td>
                     <td class="text-center" style="white-space:nowrap;">
-                        <button type="button" class="btn btn-primary btn-sm csm-toggle-btn" id="btnToggle_' . $key . '" onclick="csmToggleClientRow(\'' . $key . '\')" style="font-weight:700;">
-                            <i class="fas fa-eye"></i> View Products (' . $itemsCount . ')
+                        ' . $overviewBtn . '
+                        <button type="button" class="btn btn-default btn-sm csm-toggle-btn" id="btnToggle_' . $key . '" onclick="csmToggleClientRow(\'' . $key . '\')" style="font-weight:700;">
+                            <i class="fas fa-eye"></i> (' . $itemsCount . ')
                         </button>
                         ' . $whmcsSummaryBtn . '
-                        ' . $loginClientBtn . '
                         ' . $configureScopeBtn . '
                         ' . $removeClientBtn . '
                     </td>
@@ -2345,10 +2358,110 @@ if (!function_exists('csm_render_custom_customers_page')) {
             </div>
         </div>';
 
+        // Modal 7: Corporate Client Complete Overview & Ledger Modal
+        $csmClientsJson = json_encode($clientGroups);
+
+        $html .= '
+        <div class="modal fade" id="csmClientOverviewModal" tabindex="-1" role="dialog">
+            <div class="modal-dialog modal-lg" style="width:90%;max-width:1050px;" role="document">
+                <div class="modal-content" style="border-radius:10px;overflow:hidden;box-shadow:0 20px 40px rgba(0,0,0,0.2);">
+                    <div class="modal-header" style="background:#0f5ea8;color:#fff;padding:16px 22px;display:flex;justify-content:space-between;align-items:center;">
+                        <div>
+                            <h4 class="modal-title" id="overviewModalTitle" style="font-weight:800;font-size:18px;margin:0;">
+                                <i class="fas fa-building-user"></i> <span id="overviewClientDisplayName">Client Overview</span>
+                            </h4>
+                            <div id="overviewClientSubTitle" style="font-size:12.5px;color:rgba(255,255,255,0.85);margin-top:3px;"></div>
+                        </div>
+                        <button type="button" class="close" data-dismiss="modal" style="color:#fff;opacity:0.9;font-size:24px;margin-top:-2px;">&times;</button>
+                    </div>
+                    <div class="modal-body" style="padding:22px;background:#f8fafc;">
+                        <!-- Top Summary Cards Row -->
+                        <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:12px;margin-bottom:20px;">
+                            <div style="background:#ffffff;border:1px solid #dce6f2;border-radius:8px;padding:12px 14px;border-left:4px solid #dc2626;">
+                                <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Custom Due Balance</div>
+                                <div id="overviewDueAmount" style="font-size:20px;font-weight:800;color:#dc2626;margin-top:2px;">৳ 0.00</div>
+                                <div id="overviewDueNoteSnippet" style="font-size:11px;color:#475569;margin-top:3px;word-break:break-word;"></div>
+                            </div>
+                            <div style="background:#ffffff;border:1px solid #dce6f2;border-radius:8px;padding:12px 14px;border-left:4px solid #16a34a;">
+                                <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">This Month Status</div>
+                                <div id="overviewMonthStatus" style="font-size:18px;font-weight:800;color:#16a34a;margin-top:4px;">Paid</div>
+                                <div id="overviewMonthSub" style="font-size:11px;color:#64748b;margin-top:3px;">Current Cycle</div>
+                            </div>
+                            <div style="background:#ffffff;border:1px solid #dce6f2;border-radius:8px;padding:12px 14px;border-left:4px solid #0284c7;">
+                                <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Bill Pay Date</div>
+                                <div id="overviewBillPayDate" style="font-size:18px;font-weight:800;color:#0f5ea8;margin-top:4px;">Not Set</div>
+                                <div id="overviewBillPayBadge" style="margin-top:3px;"></div>
+                            </div>
+                            <div style="background:#ffffff;border:1px solid #dce6f2;border-radius:8px;padding:12px 14px;border-left:4px solid #8b5cf6;">
+                                <div style="font-size:11px;color:#64748b;font-weight:700;text-transform:uppercase;">Recurring Total</div>
+                                <div id="overviewRecurringTotal" style="font-size:20px;font-weight:800;color:#7c3aed;margin-top:2px;">৳ 0.00</div>
+                                <div id="overviewProductsCount" style="font-size:11px;color:#64748b;margin-top:3px;">0 Active Products</div>
+                            </div>
+                        </div>
+
+                        <!-- Action Toolbar -->
+                        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+                            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                                <button type="button" class="btn btn-success btn-sm" id="overviewBtnPaid" style="font-weight:700;"><i class="fas fa-check"></i> Mark Paid Today</button>
+                                <button type="button" class="btn btn-default btn-sm" id="overviewBtnEditDue" style="font-weight:700;"><i class="fas fa-pen-to-square text-primary"></i> Edit Due &amp; Pay Date</button>
+                                <button type="button" class="btn btn-default btn-sm" id="overviewBtnEditAlias" style="font-weight:700;"><i class="fas fa-id-badge text-warning"></i> Change Custom Name</button>
+                                <button type="button" class="btn btn-default btn-sm" id="overviewBtnAddNote" style="font-weight:700;"><i class="fas fa-plus text-info"></i> Add Payment Remark</button>
+                            </div>
+                            <div id="overviewContactLinks" style="display:flex;gap:6px;"></div>
+                        </div>
+
+                        <!-- Tabs: Active Services vs Complete Ledger -->
+                        <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+                            <ul class="nav nav-tabs" style="background:#f1f5f9;padding:8px 12px 0 12px;border-bottom:1px solid #e2e8f0;">
+                                <li class="active"><a href="#csmOverviewTabServices" data-toggle="tab" style="font-weight:700;font-size:13px;"><i class="fas fa-cubes text-primary"></i> Active Products &amp; Services (<span id="overviewTabServiceCount">0</span>)</a></li>
+                                <li><a href="#csmOverviewTabLedger" data-toggle="tab" style="font-weight:700;font-size:13px;"><i class="fas fa-history text-success"></i> Payment Ledger &amp; Remarks History (<span id="overviewTabNotesCount">0</span>)</a></li>
+                            </ul>
+                            <div class="tab-content" style="padding:16px;">
+                                <div class="tab-pane active" id="csmOverviewTabServices">
+                                    <div style="overflow-x:auto;">
+                                        <table class="table table-bordered table-striped" style="margin-bottom:0;font-size:12.5px;">
+                                            <thead style="background:#f8fafc;">
+                                                <tr>
+                                                    <th>Item ID</th>
+                                                    <th>Product / Service</th>
+                                                    <th>Domain / IP</th>
+                                                    <th>Billing Cycle</th>
+                                                    <th>Recurring Price</th>
+                                                    <th>WHMCS Next Due</th>
+                                                    <th>Status</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="overviewServicesTableBody">
+                                                <tr><td colspan="7" class="text-center text-muted">No items</td></tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                                <div class="tab-pane" id="csmOverviewTabLedger">
+                                    <div id="overviewLedgerLoading" style="text-align:center;padding:25px;color:#64748b;">
+                                        <i class="fas fa-spinner fa-spin fa-2x"></i>
+                                        <p style="margin-top:6px;">Loading payment ledger history...</p>
+                                    </div>
+                                    <div id="overviewLedgerList" style="display:none;max-height:280px;overflow-y:auto;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer" style="background:#f1f5f9;padding:12px 20px;">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Close Overview</button>
+                    </div>
+                </div>
+            </div>
+        </div>';
+
         // JavaScript for Client-Centric Custom Monitor
         $html .= '
         <script>
         var CSM_MODULE_LINK = "' . addslashes($moduleLink) . '";
+        var CSM_CLIENTS_DATA = ' . ($csmClientsJson ?: '{}') . ';
+        var CSM_CURR_PREFIX = "' . addslashes($currPrefix) . '";
+        var CSM_CURR_SUFFIX = "' . addslashes($currSuffix) . '";
+        var CSM_CURR_MONTH = "' . date('F Y') . '";
         var CSM_NOTE_URL = CSM_MODULE_LINK + "&ajax=save_note";
         var CSM_EDIT_NOTE_URL = CSM_MODULE_LINK + "&ajax=edit_note";
         var CSM_DELETE_NOTE_URL = CSM_MODULE_LINK + "&ajax=delete_note";
@@ -3256,6 +3369,166 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 }
             }
         };
+
+        // Client Complete Overview & Ledger Modal Handlers
+        window.openClientOverviewModal = function(groupKey) {
+            if (!window.CSM_CLIENTS_DATA || !window.CSM_CLIENTS_DATA[groupKey]) {
+                alert("Client data not found");
+                return;
+            }
+            var cl = window.CSM_CLIENTS_DATA[groupKey];
+            var isWhmcs = cl.is_whmcs;
+            var uId = parseInt(cl.userid, 10);
+            var name = cl.client_name || "Client";
+            var alias = cl.custom_alias || "";
+            var due = parseFloat(cl.custom_due_amount || 0);
+            var dueNote = cl.custom_due_note || "";
+            var lastPaid = cl.last_paid_date || "";
+            var paidStatus = cl.paid_status || (due > 0 ? "unpaid" : "paid");
+            var totalRecurring = parseFloat(cl.total_recurring || 0);
+            var items = cl.items || [];
+            var currPfx = window.CSM_CURR_PREFIX || "৳ ";
+            var currSfx = window.CSM_CURR_SUFFIX || "";
+            var isUnpaid = (due > 0 || paidStatus.toLowerCase() !== "paid");
+
+            var titleHtml = alias 
+                ? "<i class=\"fas fa-id-badge text-warning\"></i> " + $("<div>").text(alias).html() + " <small style=\"color:#e0f2fe;font-size:13.5px;font-weight:normal;\">(" + $("<div>").text(name).html() + ")</small>" 
+                : "<i class=\"fas fa-user-circle\"></i> " + $("<div>").text(name).html();
+            $("#overviewClientDisplayName").html(titleHtml);
+
+            var subHtml = (isWhmcs && uId > 0) 
+                ? "<span class=\"badge\" style=\"background:#e0f2fe;color:#0369a1;font-weight:700;\">WHMCS Client #" + uId + "</span> " 
+                : "<span class=\"badge\" style=\"background:#f1f5f9;color:#475569;\">Offline Customer</span> ";
+            if (cl.phone) {
+                subHtml += " &bull; <i class=\"fas fa-phone\"></i> " + $("<div>").text(cl.phone).html();
+            }
+            $("#overviewClientSubTitle").html(subHtml);
+
+            // Contact link icons
+            var contactIcons = "";
+            var rawDigits = (cl.phone || "").replace(/[^0-9]/g, "");
+            if (rawDigits) {
+                contactIcons += "<a href=\"tel:+" + rawDigits + "\" class=\"btn btn-primary btn-sm\" title=\"Call\"><i class=\"fas fa-phone\"></i></a> ";
+                contactIcons += "<a href=\"https://wa.me/" + rawDigits + "\" target=\"_blank\" class=\"btn btn-success btn-sm\" title=\"WhatsApp\"><i class=\"fab fa-whatsapp\"></i></a> ";
+            }
+            if (isWhmcs && uId > 0) {
+                contactIcons += "<a href=\"clientssummary.php?userid=" + uId + "\" target=\"_blank\" class=\"btn btn-default btn-sm\" title=\"WHMCS Profile\"><i class=\"fas fa-user-check text-primary\"></i> WHMCS Profile</a>";
+            }
+            $("#overviewContactLinks").html(contactIcons);
+
+            // 1. Due Card
+            if (due > 0) {
+                $("#overviewDueAmount").css("color", "#dc2626").html("<i class=\"fas fa-circle-exclamation\"></i> " + currPfx + due.toFixed(2) + currSfx);
+            } else {
+                $("#overviewDueAmount").css("color", "#16a34a").html("<i class=\"fas fa-circle-check\"></i> " + currPfx + "0.00" + currSfx);
+            }
+            $("#overviewDueNoteSnippet").text(dueNote || "No remarks");
+
+            // 2. Month Status Card
+            var monthName = window.CSM_CURR_MONTH || "Current Month";
+            if (isUnpaid) {
+                $("#overviewMonthStatus").css("color", "#dc2626").html("<i class=\"fas fa-circle-xmark\"></i> Unpaid");
+                $("#overviewMonthSub").text(monthName + " Pending");
+            } else {
+                $("#overviewMonthStatus").css("color", "#16a34a").html("<i class=\"fas fa-circle-check\"></i> Paid");
+                $("#overviewMonthSub").text(monthName + " Cleared");
+            }
+
+            // 3. Bill Pay Date Card
+            if (lastPaid && lastPaid !== "0000-00-00") {
+                $("#overviewBillPayDate").text(lastPaid);
+                if (!isUnpaid) {
+                    $("#overviewBillPayBadge").html("<span class=\"label label-success\"><i class=\"fas fa-check\"></i> Paid Cleared</span>");
+                } else {
+                    $("#overviewBillPayBadge").html("<span class=\"label label-warning\"><i class=\"fas fa-calendar-alt\"></i> Expected Pay Date</span>");
+                }
+            } else {
+                $("#overviewBillPayDate").text("Not Set");
+                $("#overviewBillPayBadge").html("<span class=\"label label-default\">Click Edit Due to set</span>");
+            }
+
+            // 4. Recurring Total Card
+            $("#overviewRecurringTotal").text(currPfx + totalRecurring.toFixed(2) + currSfx);
+            $("#overviewProductsCount").text(items.length + " Monitored Items");
+
+            // Modal Button Actions
+            $("#overviewBtnPaid").off("click").on("click", function() {
+                csmQuickMarkPaid(groupKey, name);
+            });
+            $("#overviewBtnEditDue").off("click").on("click", function() {
+                openEditClientDueModal(groupKey, due, dueNote, name, lastPaid, paidStatus);
+            });
+            $("#overviewBtnEditAlias").off("click").on("click", function() {
+                openEditClientAliasModal(groupKey, alias, name);
+            });
+            $("#overviewBtnAddNote").off("click").on("click", function() {
+                openNoteModal((isWhmcs ? "service" : "custom_customer"), (isWhmcs ? uId : parseInt(groupKey.replace("offline_", ""), 10)), name + (alias ? " (" + alias + ")" : ""), due);
+            });
+
+            // Tab 1: Products Table
+            $("#overviewTabServiceCount").text(items.length);
+            if (items.length === 0) {
+                $("#overviewServicesTableBody").html("<tr><td colspan=\"7\" class=\"text-center text-muted\" style=\"padding:25px;\">No active services configured for this client.</td></tr>");
+            } else {
+                var sHtml = "";
+                items.forEach(function(it) {
+                    var stClass = it.status === "Active" ? "success" : (it.status === "Suspended" ? "danger" : "default");
+                    sHtml += "<tr>" +
+                        "<td><strong>#" + it.id + "</strong></td>" +
+                        "<td><strong>" + $("<div>").text(it.product_name).html() + "</strong></td>" +
+                        "<td>" + (it.domain ? "<i class=\"fas fa-globe text-primary\"></i> " + $("<div>").text(it.domain).html() : "<span class=\"text-muted\">—</span>") + "</td>" +
+                        "<td>" + $("<div>").text(it.billing_cycle || "Monthly").html() + "</td>" +
+                        "<td><strong>" + currPfx + parseFloat(it.price || 0).toFixed(2) + currSfx + "</strong></td>" +
+                        "<td>" + (it.next_due_date || "N/A") + "</td>" +
+                        "<td><span class=\"label label-" + stClass + "\">" + it.status + "</span></td>" +
+                    "</tr>";
+                });
+                $("#overviewServicesTableBody").html(sHtml);
+            }
+
+            // Tab 2: Ledger History
+            loadClientOverviewLedger(groupKey, (isWhmcs ? "service" : "custom_customer"), (isWhmcs ? uId : parseInt(groupKey.replace("offline_", ""), 10)));
+
+            $("#csmClientOverviewModal").modal("show");
+        };
+
+        function loadClientOverviewLedger(groupKey, relType, relId) {
+            $("#overviewLedgerLoading").show();
+            $("#overviewLedgerList").hide().empty();
+
+            $.ajax({
+                url: CSM_GET_NOTES_URL + "&rel_type=" + encodeURIComponent(relType) + "&rel_id=" + encodeURIComponent(relId),
+                type: "GET",
+                dataType: "json",
+                success: function(res) {
+                    $("#overviewLedgerLoading").hide();
+                    if (res && res.success && res.notes && res.notes.length > 0) {
+                        $("#overviewTabNotesCount").text(res.notes.length);
+                        var lHtml = "<div style=\"display:flex;flex-direction:column;gap:10px;\">";
+                        res.notes.forEach(function(n) {
+                            lHtml += "<div style=\"background:#ffffff;border:1px solid #e2e8f0;border-left:4px solid #0284c7;border-radius:6px;padding:12px 14px;box-shadow:0 1px 2px rgba(0,0,0,0.03);\">" +
+                                "<div style=\"font-weight:700;color:#1e293b;font-size:13px;\">" + $("<div>").text(n.note).html() + "</div>" +
+                                "<div style=\"font-size:11.5px;color:#64748b;margin-top:5px;display:flex;gap:12px;flex-wrap:wrap;\">" +
+                                    (n.paid_amount ? "<span style=\"color:#16a34a;font-weight:700;\"><i class=\"fas fa-check\"></i> Paid: " + n.paid_amount + "</span>" : "") +
+                                    (n.due_amount ? "<span style=\"color:#dc2626;font-weight:700;\"><i class=\"fas fa-exclamation-circle\"></i> Due: " + n.due_amount + "</span>" : "") +
+                                    (n.promised_date ? "<span style=\"color:#0284c7;font-weight:700;\"><i class=\"fas fa-calendar\"></i> Promised: " + n.promised_date + "</span>" : "") +
+                                    "<span style=\"color:#94a3b8;\"><i class=\"far fa-clock\"></i> " + n.created_at + " (" + (n.admin_name || "Admin") + ")</span>" +
+                                "</div>" +
+                            "</div>";
+                        });
+                        lHtml += "</div>";
+                        $("#overviewLedgerList").html(lHtml).show();
+                    } else {
+                        $("#overviewTabNotesCount").text("0");
+                        $("#overviewLedgerList").html("<p class=\"text-muted\" style=\"text-align:center;padding:25px;margin:0;\"><i class=\"fas fa-receipt\" style=\"font-size:28px;display:block;opacity:0.3;margin-bottom:8px;\"></i>No previous payment notes or ledger records entered for this client yet.</p>").show();
+                    }
+                },
+                error: function() {
+                    $("#overviewLedgerLoading").hide();
+                    $("#overviewLedgerList").html("<div class=\"alert alert-danger\" style=\"margin:0;\">Network error loading ledger entries.</div>").show();
+                }
+            });
+        }
         </script>';
 
         return $html;
