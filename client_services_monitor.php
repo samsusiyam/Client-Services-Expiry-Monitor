@@ -106,7 +106,7 @@ if (!function_exists('csm_ensure_tables')) {
                 });
             }
 
-            // 5. Monitored / Selected VIP Clients Table
+            // 5. Monitored / Corporate Clients Table
             if (!Capsule::schema()->hasTable('mod_csm_monitored_clients')) {
                 Capsule::schema()->create('mod_csm_monitored_clients', function ($table) {
                     $table->increments('id');
@@ -114,6 +114,11 @@ if (!function_exists('csm_ensure_tables')) {
                     $table->string('monitor_mode', 20)->default('all'); // 'all', 'specific'
                     $table->text('monitored_services')->nullable(); // JSON array of service IDs
                     $table->text('monitored_domains')->nullable(); // JSON array of domain IDs
+                    $table->string('custom_alias_name', 255)->nullable();
+                    $table->decimal('custom_due_amount', 10, 2)->default(0.00);
+                    $table->text('custom_due_note')->nullable();
+                    $table->date('last_paid_date')->nullable();
+                    $table->string('paid_status', 50)->default('unpaid');
                     $table->text('notes')->nullable();
                     $table->dateTime('created_at')->nullable();
                     $table->dateTime('updated_at')->nullable();
@@ -124,6 +129,25 @@ if (!function_exists('csm_ensure_tables')) {
                         $table->string('monitor_mode', 20)->default('all')->after('userid');
                         $table->text('monitored_services')->nullable()->after('monitor_mode');
                         $table->text('monitored_domains')->nullable()->after('monitored_services');
+                    });
+                }
+                if (!Capsule::schema()->hasColumn('mod_csm_monitored_clients', 'custom_alias_name')) {
+                    Capsule::schema()->table('mod_csm_monitored_clients', function ($table) {
+                        $table->string('custom_alias_name', 255)->nullable()->after('notes');
+                        $table->decimal('custom_due_amount', 10, 2)->default(0.00)->after('custom_alias_name');
+                        $table->text('custom_due_note')->nullable()->after('custom_due_amount');
+                        $table->date('last_paid_date')->nullable()->after('custom_due_note');
+                        $table->string('paid_status', 50)->default('unpaid')->after('last_paid_date');
+                    });
+                }
+            }
+
+            if (Capsule::schema()->hasTable('mod_csm_custom_customers')) {
+                if (!Capsule::schema()->hasColumn('mod_csm_custom_customers', 'custom_alias_name')) {
+                    Capsule::schema()->table('mod_csm_custom_customers', function ($table) {
+                        $table->string('custom_alias_name', 255)->nullable()->after('customer_name');
+                        $table->text('custom_due_note')->nullable()->after('notes');
+                        $table->date('last_paid_date')->nullable()->after('custom_due_note');
                     });
                 }
             }
@@ -824,11 +848,11 @@ if (!function_exists('csm_render_header')) {
             </div>
             <div class="csm-nav-wrapper">
                 <div class="csm-nav-container">
+                    <a href="' . csm_h($moduleLink) . '&action=custom_customers" class="csm-nav-btn' . ($action === 'custom_customers' ? ' active' : '') . '">
+                        <i class="fas fa-users-gear"></i> Corporate Customer
+                    </a>
                     <a href="' . csm_h($moduleLink) . '&action=live_monitor" class="csm-nav-btn' . ($action === 'live_monitor' ? ' active' : '') . '">
                         <i class="fas fa-desktop"></i> Live Monitor
-                    </a>
-                    <a href="' . csm_h($moduleLink) . '&action=custom_customers" class="csm-nav-btn' . ($action === 'custom_customers' ? ' active' : '') . '">
-                        <i class="fas fa-users-gear"></i> Custom Customers &amp; Ledger
                     </a>
                     <a href="' . csm_h($moduleLink) . '&action=suspension_manager" class="csm-nav-btn' . ($action === 'suspension_manager' ? ' active' : '') . '">
                         <i class="fas fa-clock-rotate-left"></i> Custom Suspend Overdue
@@ -1092,6 +1116,13 @@ if (!function_exists('csm_render_custom_customers_page')) {
         if (!empty($monitoredClients)) {
             foreach ($monitoredClients as $mc) {
                 $key = 'client_' . $mc->id;
+                $mRow = isset($monitoredRows[$mc->id]) ? $monitoredRows[$mc->id] : null;
+                $customAlias = $mRow && !empty($mRow->custom_alias_name) ? $mRow->custom_alias_name : '';
+                $customDueAmount = $mRow ? (float)$mRow->custom_due_amount : 0.00;
+                $customDueNote = $mRow && !empty($mRow->custom_due_note) ? $mRow->custom_due_note : '';
+                $lastPaidDate = $mRow && !empty($mRow->last_paid_date) && $mRow->last_paid_date !== '0000-00-00' ? $mRow->last_paid_date : '';
+                $paidStatus = $mRow && !empty($mRow->paid_status) ? $mRow->paid_status : ($customDueAmount > 0 ? 'unpaid' : 'paid');
+
                 $clientGroups[$key] = [
                     'group_key'         => $key,
                     'is_whmcs'          => true,
@@ -1102,7 +1133,12 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     'phone'             => $mc->phonenumber ?: '',
                     'client_status'     => $mc->status ?: 'Active',
                     'currency'          => $mc->currency,
-                    'monitor_mode'      => isset($monitoredRows[$mc->id]) ? $monitoredRows[$mc->id]->monitor_mode : 'all',
+                    'monitor_mode'      => $mRow ? $mRow->monitor_mode : 'all',
+                    'custom_alias'      => $customAlias,
+                    'custom_due_amount' => $customDueAmount,
+                    'custom_due_note'   => $customDueNote,
+                    'last_paid_date'    => $lastPaidDate,
+                    'paid_status'       => $paidStatus,
                     'items'             => [],
                     'unpaid_inv_due'    => $clientUnpaidInvoices[$mc->id]['total_due'] ?? 0.00,
                     'unpaid_inv_count'  => $clientUnpaidInvoices[$mc->id]['count'] ?? 0,
@@ -1199,6 +1235,12 @@ if (!function_exists('csm_render_custom_customers_page')) {
             } else {
                 // Standalone Offline / Non-WHMCS Custom Customer
                 $key = 'offline_' . $cust->id;
+                $customAlias = !empty($cust->custom_alias_name) ? $cust->custom_alias_name : '';
+                $customDueAmount = isset($cust->amount) ? (float)$cust->amount : 0.00;
+                $customDueNote = !empty($cust->custom_due_note) ? $cust->custom_due_note : (!empty($cust->notes) ? $cust->notes : '');
+                $lastPaidDate = !empty($cust->last_paid_date) && $cust->last_paid_date !== '0000-00-00' ? $cust->last_paid_date : '';
+                $paidStatus = !empty($cust->status) ? strtolower($cust->status) : ($customDueAmount > 0 ? 'unpaid' : 'paid');
+
                 $clientGroups[$key] = [
                     'group_key'         => $key,
                     'is_whmcs'          => false,
@@ -1210,6 +1252,11 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     'client_status'     => $cust->status ?: 'Active',
                     'currency'          => 0,
                     'monitor_mode'      => 'custom',
+                    'custom_alias'      => $customAlias,
+                    'custom_due_amount' => $customDueAmount,
+                    'custom_due_note'   => $customDueNote,
+                    'last_paid_date'    => $lastPaidDate,
+                    'paid_status'       => $paidStatus,
                     'items'             => [
                         [
                             'id'           => $cust->id,
@@ -1249,7 +1296,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
         $globalDueTodayCount = 0;
         $globalDue7DaysCount = 0;
         $globalOverdueCount = 0;
-        $globalTotalDueAmount = 0.00;
+        $globalTotalCustomDue = 0.00;
 
         foreach ($clientGroups as $k => &$grp) {
             $grpRecurring = 0.00;
@@ -1310,56 +1357,43 @@ if (!function_exists('csm_render_custom_customers_page')) {
             $grp['earliest_due_days'] = $minDays;
             $grp['earliest_due_cat'] = $earliestCat;
 
-            $globalTotalDueAmount += (float)$grp['unpaid_inv_due'];
+            $globalTotalCustomDue += (float)$grp['custom_due_amount'];
         }
         unset($grp);
 
-        // Sort Clients by Earliest Next Due Date ASC
+        // Sort Corporate Clients: Unpaid Dues first, then earliest/empty last_paid_date first, then client name
         uasort($clientGroups, function ($a, $b) {
-            $dateA = !empty($a['earliest_due_date']) && $a['earliest_due_date'] !== '0000-00-00' ? $a['earliest_due_date'] : '9999-12-31';
-            $dateB = !empty($b['earliest_due_date']) && $b['earliest_due_date'] !== '0000-00-00' ? $b['earliest_due_date'] : '9999-12-31';
-            if ($dateA === $dateB) {
-                return strcmp($a['client_name'], $b['client_name']);
+            $isUnpaidA = ($a['custom_due_amount'] > 0 || strtolower($a['paid_status']) !== 'paid') ? 1 : 0;
+            $isUnpaidB = ($b['custom_due_amount'] > 0 || strtolower($b['paid_status']) !== 'paid') ? 1 : 0;
+            if ($isUnpaidA !== $isUnpaidB) {
+                return $isUnpaidB - $isUnpaidA;
             }
-            return strcmp($dateA, $dateB);
+
+            $dateA = !empty($a['last_paid_date']) && $a['last_paid_date'] !== '0000-00-00' ? $a['last_paid_date'] : '0000-00-00';
+            $dateB = !empty($b['last_paid_date']) && $b['last_paid_date'] !== '0000-00-00' ? $b['last_paid_date'] : '0000-00-00';
+            if ($dateA !== $dateB) {
+                return strcmp($dateA, $dateB);
+            }
+
+            return strcmp($a['client_name'], $b['client_name']);
         });
 
-        // Monitored Clients Filter Chips Bar
-        $clientChipsHtml = '';
-        if (!empty($monitoredClients) && $monitoredClients->count() > 0) {
-            $clientChipsHtml .= '<button type="button" class="btn btn-default btn-xs csm-client-filter-chip active-chip" id="csmChipAll" onclick="csmFilterByClient(\'\')" style="border-radius:20px;font-weight:700;margin:3px 4px 3px 0;background:#12589b;color:#fff;border-color:#12589b;padding:4px 12px;"><i class="fas fa-layer-group"></i> All Clients (' . count($clientGroups) . ')</button>';
-            foreach ($monitoredClients as $mc) {
-                $cName = trim($mc->firstname . ' ' . $mc->lastname);
-                $cComp = $mc->companyname ? ' (' . $mc->companyname . ')' : '';
-                $itemCount = isset($clientGroups['client_' . $mc->id]) ? count($clientGroups['client_' . $mc->id]['items']) : 0;
-                $removeUrl = $moduleLink . '&action=remove_monitored_client&userid=' . $mc->id;
-                $clientChipsHtml .= '<span class="csm-client-chip" data-userid="' . $mc->id . '" onclick="csmFilterByClient(' . $mc->id . ')" style="cursor:pointer;display:inline-flex;align-items:center;background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;padding:4px 10px;border-radius:20px;font-size:12px;font-weight:700;margin:3px 4px 3px 0;transition:all 0.15s ease;" title="Click to view client ' . csm_h($cName) . '">'
-                    . '<i class="fas fa-user-check text-primary" style="margin-right:5px;"></i>'
-                    . '<span class="csm-chip-label">#' . $mc->id . ' ' . csm_h($cName) . csm_h($cComp) . ' <strong style="color:#0f5ea8;">(' . $itemCount . ' Products)</strong></span>'
-                    . '<a href="javascript:void(0)" onclick="event.stopPropagation(); openConfigureClientModal(' . $mc->id . ')" style="color:#0284c7;margin-left:6px;font-size:12px;padding:1px 3px;" title="Configure Monitored Services &amp; Scope"><i class="fas fa-sliders"></i></a>'
-                    . '<a href="clientssummary.php?userid=' . $mc->id . '" target="_blank" onclick="event.stopPropagation()" style="color:#64748b;margin-left:4px;font-size:11px;" title="View WHMCS Profile"><i class="fas fa-external-link-alt"></i></a>'
-                    . '<a href="' . csm_h($removeUrl) . '" onclick="event.stopPropagation(); return csmConfirmDelete(this.href, \'Remove #' . $mc->id . ' ' . csm_h(addslashes($cName)) . ' from Custom Monitor?\')" style="color:#dc2626;margin-left:8px;font-weight:900;text-decoration:none;font-size:14px;" title="Remove from Monitor">&times;</a>'
-                    . '</span>';
-            }
-        } else {
-            $clientChipsHtml = '<span class="text-muted" style="font-size:12.5px;"><i class="fas fa-info-circle"></i> No specific clients added yet. Click <strong>"Add Clients to Monitor"</strong> to select your high-value / VIP clients.</span>';
-        }
-
         // Client Dropdown Options for Filter
-        $clientFilterOptions = '<option value="">All Monitored Clients (' . count($clientGroups) . ')</option>';
+        $clientFilterOptions = '<option value="">All Corporate Clients (' . count($clientGroups) . ')</option>';
         if (!empty($clientGroups)) {
             foreach ($clientGroups as $cg) {
                 $cId = $cg['userid'] > 0 ? '#' . $cg['userid'] : '#Offline-' . str_replace('offline_', '', $cg['group_key']);
                 $cComp = $cg['company'] ? ' (' . $cg['company'] . ')' : '';
+                $cAlias = !empty($cg['custom_alias']) ? ' [' . $cg['custom_alias'] . ']' : '';
                 $itemCount = count($cg['items']);
-                $clientFilterOptions .= '<option value="' . $cg['group_key'] . '">' . $cId . ' - ' . csm_h($cg['client_name']) . csm_h($cComp) . ' (' . $itemCount . ')</option>';
+                $clientFilterOptions .= '<option value="' . $cg['group_key'] . '">' . $cId . ' - ' . csm_h($cg['client_name'] . $cAlias . $cComp) . ' (' . $itemCount . ')</option>';
             }
         }
 
         // 6 Summary Stats Cards
         $html .= '<div class="csm-stats" style="grid-template-columns: repeat(6, minmax(0, 1fr));">
-            <div class="csm-stat" onclick="csmFilterCustom(\'\')" title="Show All Monitored Clients">
-                <div class="csm-stat-label">Monitored Clients</div>
+            <div class="csm-stat" onclick="csmFilterCustom(\'\')" title="Show All Corporate Clients">
+                <div class="csm-stat-label">Corporate Clients</div>
                 <div class="csm-stat-value">' . $totalClientsCount . '</div>
             </div>
             <div class="csm-stat" onclick="csmFilterCustom(\'active\')" title="Show Active Services">
@@ -1378,36 +1412,34 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 <div class="csm-stat-label">Overdue Services</div>
                 <div class="csm-stat-value" style="color:#dc2626;">' . $globalOverdueCount . '</div>
             </div>
-            <div class="csm-stat" onclick="csmFilterCustom(\'unpaid\')" title="Show Total Unpaid Invoices Due">
-                <div class="csm-stat-label">Total Unpaid Due</div>
-                <div class="csm-stat-value" style="color:#dc2626;font-size:18px;">' . $currPrefix . number_format((float)$globalTotalDueAmount, 2) . $currSuffix . '</div>
+            <div class="csm-stat" onclick="csmFilterCustom(\'unpaid\')" title="Show Total Custom Dues">
+                <div class="csm-stat-label">Total Custom Due</div>
+                <div class="csm-stat-value" style="color:#dc2626;font-size:18px;">' . $currPrefix . number_format((float)$globalTotalCustomDue, 2) . $currSuffix . '</div>
             </div>
         </div>';
 
-        // Header Action Card with Monitored Clients List
+        // Header Action Card
         $html .= '<div class="csm-card" style="margin-bottom:18px;">
-            <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;border-bottom:1px solid #eef3f8;">
+            <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                 <div>
                     <h4 style="margin:0;font-weight:800;color:#1e293b;font-size:16px;">
-                        <i class="fas fa-users-gear text-primary"></i> Monitored VIP Clients &amp; Ledgers
+                        <i class="fas fa-building-user text-primary"></i> Corporate Customers &amp; Payment Ledgers
                     </h4>
-                    <div class="csm-muted">Client-centric live monitoring. Expand any client row to view individual products, domains, server details, due dates &amp; payment ledgers.</div>
+                    <div class="csm-muted">Client-centric live monitoring with custom nicknames, manual due ledger notes and one-click bill payment confirmation.</div>
                 </div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <button class="btn btn-primary btn-sm" onclick="openManageMonitoredClientsModal()"><i class="fas fa-user-plus"></i> Add Clients to Monitor</button>
-                    <button class="btn btn-default btn-sm" onclick="openAddCustomerModal()"><i class="fas fa-plus"></i> Add Offline / Custom Service</button>
+                    <button type="button" class="btn btn-default btn-sm" id="csmToggleFilterBtn" onclick="csmToggleFilterPanel()"><i class="fas fa-filter text-primary"></i> <span id="csmToggleFilterText">Show Search &amp; Filters</span></button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openManageMonitoredClientsModal()"><i class="fas fa-user-plus"></i> Add Clients to Monitor</button>
+                    <button type="button" class="btn btn-default btn-sm" onclick="openAddCustomerModal()"><i class="fas fa-plus"></i> Add Offline / Custom Service</button>
                 </div>
-            </div>
-            <div style="padding:14px 20px;background:#f8fafc;display:flex;flex-wrap:wrap;align-items:center;gap:6px;">
-                <span style="font-weight:700;font-size:12px;color:#475569;margin-right:6px;"><i class="fas fa-tags"></i> Active Monitored List:</span>
-                ' . $clientChipsHtml . '
             </div>
         </div>';
 
-        // Real-Time Search & Filtering Panel
-        $html .= '<div class="panel panel-default csm-filter-panel" style="border-radius:8px;border:1px solid #dce6f2;margin-bottom:20px;background:#ffffff;box-shadow:0 10px 24px rgba(15,23,42,0.06);overflow:hidden;">
-            <div class="panel-heading" style="background:#f8fafc;padding:12px 18px;border-bottom:1px solid #e2e8f0;">
+        // Real-Time Search & Filtering Panel (Initially Hidden)
+        $html .= '<div class="panel panel-default csm-filter-panel" id="csmFilterPanel" style="display:none;border-radius:8px;border:1px solid #dce6f2;margin-bottom:20px;background:#ffffff;box-shadow:0 10px 24px rgba(15,23,42,0.06);overflow:hidden;">
+            <div class="panel-heading" style="background:#f8fafc;padding:12px 18px;border-bottom:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
                 <h3 class="panel-title" style="font-weight:700;font-size:14px;margin:0;color:#1e293b;"><i class="fa-solid fa-filter text-primary"></i> Real-Time Search &amp; Client Filters</h3>
+                <button type="button" class="btn btn-default btn-xs" onclick="csmToggleFilterPanel()"><i class="fas fa-times"></i> Close</button>
             </div>
             <div class="panel-body" style="padding:18px;">
                 <form id="customFilterForm" onsubmit="return false;">
@@ -1415,7 +1447,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                         <!-- Left Column -->
                         <div class="col-md-6 col-sm-12">
                             <div class="form-group row" style="margin-bottom:12px;display:flex;align-items:center;">
-                                <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Monitored Client</label>
+                                <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Corporate Client</label>
                                 <div class="col-sm-8">
                                     <select id="filterCustomClient" class="form-control">
                                         ' . $clientFilterOptions . '
@@ -1486,7 +1518,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                                 <label class="col-sm-4 control-label" style="font-weight:700;color:#475569;margin-bottom:0;">Live Search</label>
                                 <div class="col-sm-8">
                                     <div class="input-group" style="width:100%;">
-                                        <input type="text" id="filterCustomSearch" class="form-control" placeholder="Search Client, Company, Phone, Domain, Server, Service...">
+                                        <input type="text" id="filterCustomSearch" class="form-control" placeholder="Search Client, Alias, Phone, Domain, Server, Service...">
                                         <span class="input-group-btn">
                                             <button class="btn btn-default" type="button" id="filterCustomSearchClear" title="Clear Search"><i class="fas fa-times"></i></button>
                                         </span>
@@ -1504,12 +1536,12 @@ if (!function_exists('csm_render_custom_customers_page')) {
             </div>
         </div>';
 
-        // Main Client-Centric Table Card
+        // Main Corporate Customer Table Card
         $html .= '<div class="csm-table-card">
             <div class="csm-table-header" style="padding:16px 20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
                 <div>
                     <h3 style="margin:0;font-size:18px;font-weight:800;color:#1e293b;">
-                        <i class="fas fa-users-viewfinder text-primary"></i> Monitored Clients &amp; Services Overview
+                        <i class="fas fa-users-viewfinder text-primary"></i> Corporate Customers &amp; Services Overview
                     </h3>
                     <div class="csm-muted">Click <strong>"View Products"</strong> on any client row to view and manage their individual hosting, VPS, domains and custom dues.</div>
                 </div>
@@ -1527,9 +1559,9 @@ if (!function_exists('csm_render_custom_customers_page')) {
                             <th>Phone / WhatsApp</th>
                             <th class="text-center" width="110">Products</th>
                             <th>Total Recurring</th>
-                            <th>Total Unpaid Due</th>
-                            <th>Earliest Next Due</th>
-                            <th class="text-center" width="85">Status</th>
+                            <th>Custom Due Note</th>
+                            <th>Bill Paid Date</th>
+                            <th class="text-center" width="90">Paid Action</th>
                             <th class="text-center" width="220">Action</th>
                         </tr>
                     </thead>
@@ -1538,7 +1570,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
         if (empty($clientGroups)) {
             $html .= '<tr id="csmCustomEmptyRow"><td colspan="9" style="text-align:center;padding:50px;color:#64748b;">
                 <i class="fas fa-users-gear" style="font-size:38px;margin-bottom:12px;display:block;opacity:0.4;"></i>
-                <p style="font-size:15px;font-weight:700;color:#334155;margin-bottom:6px;">No monitored clients to display</p>
+                <p style="font-size:15px;font-weight:700;color:#334155;margin-bottom:6px;">No corporate clients to display</p>
                 <p style="margin-bottom:14px;">Click <strong>"Add Clients to Monitor"</strong> above to select the specific WHMCS clients you want to track.</p>
                 <button class="btn btn-primary" onclick="openManageMonitoredClientsModal()"><i class="fas fa-user-plus"></i> Select Clients Now</button>
             </td></tr>';
@@ -1546,8 +1578,6 @@ if (!function_exists('csm_render_custom_customers_page')) {
             foreach ($clientGroups as $key => $grp) {
                 $isWhmcs = $grp['is_whmcs'];
                 $userId = $grp['userid'];
-                $clientStatusLower = strtolower($grp['client_status']);
-                $clientStatusClass = $clientStatusLower === 'active' ? 'active' : ($clientStatusLower === 'closed' ? 'suspended' : 'warning');
                 $itemsCount = count($grp['items']);
 
                 // Phone cleaning & action buttons (no dots)
@@ -1575,7 +1605,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 $earliestDueFmt = (!empty($grp['earliest_due_date']) && $grp['earliest_due_date'] !== '0000-00-00') ? date('d/m/Y', strtotime($grp['earliest_due_date'])) : 'N/A';
                 $waMessage = str_replace(
                     ['{client_name}', '{service_name}', '{domain}', '{due_date}', '{amount}'],
-                    [$grp['client_name'], $firstItemName . ' (' . $itemsCount . ' Items)', $firstItemDomain, $earliestDueFmt, $currPrefix . number_format((float)$grp['unpaid_inv_due'], 2) . $currSuffix],
+                    [$grp['client_name'], $firstItemName . ' (' . $itemsCount . ' Items)', $firstItemDomain, $earliestDueFmt, $currPrefix . number_format((float)$grp['custom_due_amount'], 2) . $currSuffix],
                     $waTemplate
                 );
                 $waUrl = !empty($intlPhone) ? 'https://wa.me/' . $intlPhone . '?text=' . urlencode($waMessage) : '';
@@ -1584,7 +1614,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 $waBtn = !empty($waUrl) ? '<a href="' . csm_h($waUrl) . '" target="_blank" class="btn btn-success btn-xs" title="WhatsApp Reminder"><i class="fab fa-whatsapp"></i></a>' : '';
                 $copyBtn = !empty($cleanDisplayPhone) ? '<button type="button" class="btn btn-default btn-xs" onclick="csmCopyText(\'' . csm_h(addslashes($cleanDisplayPhone)) . '\')" title="Copy Phone"><i class="far fa-copy"></i></button>' : '';
 
-                // Client info column
+                // Client info & Custom Alias Badge
                 $clientLink = '';
                 if ($isWhmcs && $userId > 0) {
                     $clientLink = '<a href="clientssummary.php?userid=' . $userId . '" target="_blank" style="font-weight:800;color:#0f5ea8;font-size:13.5px;"><i class="fas fa-user-circle"></i> ' . csm_h($grp['client_name']) . '</a>';
@@ -1592,30 +1622,47 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     $clientLink = '<strong style="color:#1e293b;font-size:13.5px;"><i class="fas fa-user-tag"></i> ' . csm_h($grp['client_name']) . '</strong> <span class="label label-default" style="font-size:10px;">Offline</span>';
                 }
 
-                // Total Unpaid Invoices Due display
-                $dueDisplayHtml = '';
-                if ($grp['unpaid_inv_due'] > 0) {
-                    $dueDisplayHtml = '<strong style="color:#dc2626;font-size:14px;"><i class="fas fa-circle-exclamation text-danger"></i> ' . $currPrefix . number_format((float)$grp['unpaid_inv_due'], 2) . $currSuffix . '</strong>' .
-                        '<br><small class="text-danger" style="font-weight:700;">' . (int)$grp['unpaid_inv_count'] . ' Unpaid Invoice' . ($grp['unpaid_inv_count'] > 1 ? 's' : '') . '</small>';
+                $customAlias = $grp['custom_alias'];
+                $aliasBadgeHtml = '';
+                if (!empty($customAlias)) {
+                    $aliasBadgeHtml = '<span id="csmAliasTag_' . $key . '" onclick="event.stopPropagation(); openEditClientAliasModal(\'' . $key . '\', \'' . csm_h(addslashes($customAlias)) . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\')" style="cursor:pointer;display:inline-flex;align-items:center;gap:5px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;padding:2px 8px;border-radius:6px;font-size:11.5px;font-weight:700;margin-top:4px;" title="Click to edit custom nickname / alias">'
+                        . '<i class="fas fa-id-badge text-warning"></i> <span class="csm-alias-val">' . csm_h($customAlias) . '</span> <i class="fas fa-pen" style="font-size:9px;opacity:0.6;"></i>'
+                        . '</span>';
                 } else {
-                    $dueDisplayHtml = '<span style="color:#16a34a;font-weight:700;"><i class="fas fa-check-circle"></i> ' . $currPrefix . '0.00' . $currSuffix . '</span>' .
-                        '<br><small class="text-muted">All Invoices Paid</small>';
+                    $aliasBadgeHtml = '<span id="csmAliasTag_' . $key . '" onclick="event.stopPropagation(); openEditClientAliasModal(\'' . $key . '\', \'\', \'' . csm_h(addslashes($grp['client_name'])) . '\')" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;background:#f1f5f9;color:#64748b;border:1px dashed #cbd5e1;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;margin-top:4px;" title="Set a custom alias or known nickname">'
+                        . '<i class="fas fa-plus text-primary"></i> <span class="csm-alias-val">Set Custom Name</span>'
+                        . '</span>';
                 }
 
-                // Earliest Due Date countdown badge
-                $earliestBadge = '';
-                if (!empty($grp['earliest_due_date']) && $grp['earliest_due_date'] !== '0000-00-00') {
-                    $diff = $grp['earliest_due_days'];
-                    if ($diff < 0) {
-                        $earliestBadge = '<span class="csm-badge csm-badge-overdue">' . abs($diff) . 'd Overdue</span>';
-                    } elseif ($diff === 0) {
-                        $earliestBadge = '<span class="csm-badge csm-badge-warning">Due Today</span>';
-                    } elseif ($diff <= $warningDays) {
-                        $earliestBadge = '<span class="csm-badge csm-badge-warning">' . $diff . 'd Left</span>';
-                    } else {
-                        $earliestBadge = '<small class="text-muted">' . $diff . 'd left</small>';
-                    }
+                // Custom Due Note Column display
+                $customDueAmount = (float)$grp['custom_due_amount'];
+                $customDueNote = trim($grp['custom_due_note']);
+                $dueDisplayHtml = '';
+                if ($customDueAmount > 0) {
+                    $dueDisplayHtml = '<strong id="csmDueAmountDisplay_' . $key . '" style="color:#dc2626;font-size:14px;"><i class="fas fa-circle-exclamation text-danger"></i> ' . $currPrefix . number_format($customDueAmount, 2) . $currSuffix . '</strong>';
+                } else {
+                    $dueDisplayHtml = '<span id="csmDueAmountDisplay_' . $key . '" style="color:#16a34a;font-weight:700;"><i class="fas fa-check-circle"></i> ' . $currPrefix . '0.00' . $currSuffix . '</span>';
                 }
+
+                $dueNoteSnippet = !empty($customDueNote) ? '<div id="csmDueNoteDisplay_' . $key . '" style="font-size:11.5px;color:#475569;margin-top:2px;max-width:200px;word-break:break-word;"><i class="fas fa-note-sticky text-info"></i> ' . csm_h($customDueNote) . '</div>' : '<div id="csmDueNoteDisplay_' . $key . '" style="font-size:11px;color:#94a3b8;margin-top:2px;">No remarks</div>';
+
+                $editDueBtn = '<button type="button" class="btn btn-default btn-xs" onclick="event.stopPropagation(); openEditClientDueModal(\'' . $key . '\', ' . $customDueAmount . ', \'' . csm_h(addslashes($customDueNote)) . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\')" style="margin-top:4px;font-size:11px;" title="Edit Custom Due &amp; Note"><i class="fas fa-pen-to-square text-primary"></i> Edit Due</button>';
+
+                // Bill Paid Date display
+                $lastPaidDate = $grp['last_paid_date'];
+                $paidDateDisplayHtml = '';
+                if (!empty($lastPaidDate) && $lastPaidDate !== '0000-00-00') {
+                    $pTs = strtotime($lastPaidDate);
+                    $diffPaid = (int)round(($todayTs - $pTs) / 86400);
+                    $paidDateFmt = date('d/m/Y', $pTs);
+                    $paidBadge = ($diffPaid === 0) ? '<span class="label label-warning" style="font-size:10px;">Paid Today</span>' : '<span class="label label-success" style="font-size:10px;">Paid ' . $diffPaid . 'd ago</span>';
+                    $paidDateDisplayHtml = '<strong id="csmPaidDateDisplay_' . $key . '">' . $paidDateFmt . '</strong><br><span id="csmPaidBadgeDisplay_' . $key . '">' . $paidBadge . '</span>';
+                } else {
+                    $paidDateDisplayHtml = '<span id="csmPaidDateDisplay_' . $key . '" class="text-muted" style="font-size:12px;">Not Recorded</span><br><span id="csmPaidBadgeDisplay_' . $key . '"></span>';
+                }
+
+                // Quick Mark Paid Action Button
+                $paidBtn = '<button type="button" class="btn btn-success btn-sm" id="btnPaid_' . $key . '" onclick="event.stopPropagation(); csmQuickMarkPaid(\'' . $key . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\')" style="font-weight:700;border-radius:6px;padding:5px 12px;" title="Mark Paid and Clear Due"><i class="fas fa-check"></i> Paid</button>';
 
                 // Client Row Action Shortcuts
                 $whmcsSummaryBtn = ($isWhmcs && $userId > 0) ? '<a href="clientssummary.php?userid=' . $userId . '" target="_blank" class="btn btn-default btn-sm" title="View WHMCS Client Profile"><i class="fas fa-user-check text-primary"></i></a> ' : '';
@@ -1624,10 +1671,10 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 $removeClientBtn = '';
                 if ($isWhmcs && $userId > 0) {
                     $removeUrl = $moduleLink . '&action=remove_monitored_client&userid=' . $userId;
-                    $removeClientBtn = '<a href="' . csm_h($removeUrl) . '" class="btn btn-default btn-sm" onclick="return csmConfirmDelete(this.href, \'Remove #' . $userId . ' ' . csm_h(addslashes($grp['client_name'])) . ' from Custom Monitor?\')" title="Remove from Monitor"><i class="fas fa-trash-can text-danger"></i></a>';
+                    $removeClientBtn = '<a href="' . csm_h($removeUrl) . '" class="btn btn-default btn-sm" onclick="return csmConfirmDelete(this.href, \'Remove #' . $userId . ' ' . csm_h(addslashes($grp['client_name'])) . ' from Corporate Monitor?\')" title="Remove from Monitor"><i class="fas fa-trash-can text-danger"></i></a>';
                 }
 
-                // Compile Search Corpus for Client Master Row (Includes child item names, domains, IPs, servers & notes)
+                // Compile Search Corpus for Client Master Row
                 $childSearchTerms = [];
                 $childProductTypes = [];
                 $childBillingCycles = [];
@@ -1643,14 +1690,13 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     }
                     $childStatuses[] = strtolower($it['status']);
 
-                    // Include note text
                     $nKey = $it['record_type'] . '_' . $it['id'];
                     if (isset($notes[$nKey]) && $notes[$nKey]->first()) {
                         $childSearchTerms[] = $notes[$nKey]->first()->note;
                     }
                 }
 
-                $searchCorpus = strtolower($userId . ' ' . $grp['client_name'] . ' ' . $grp['company'] . ' ' . $grp['email'] . ' ' . $cleanDisplayPhone . ' ' . $digitsPhone . ' ' . implode(' ', $childSearchTerms));
+                $searchCorpus = strtolower($userId . ' ' . $grp['client_name'] . ' ' . $customAlias . ' ' . $customDueNote . ' ' . $grp['company'] . ' ' . $grp['email'] . ' ' . $cleanDisplayPhone . ' ' . $digitsPhone . ' ' . implode(' ', $childSearchTerms));
                 $productTypesStr = implode(',', array_unique($childProductTypes));
                 $billingCyclesStr = implode(',', array_unique($childBillingCycles));
                 $serverIdsStr = implode(',', array_unique($childServerIds));
@@ -1676,6 +1722,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                         ' . $clientLink . '
                         ' . ($grp['company'] ? '<br><small class="text-muted"><i class="fas fa-building"></i> ' . csm_h($grp['company']) . '</small>' : '') . '
                         ' . ($grp['email'] ? '<br><small><a href="mailto:' . csm_h($grp['email']) . '" onclick="event.stopPropagation()" style="color:#64748b;"><i class="fas fa-envelope"></i> ' . csm_h($grp['email']) . '</a></small>' : '') . '
+                        <div style="margin-top:2px;">' . $aliasBadgeHtml . '</div>
                     </td>
                     <td>
                         <div style="font-size:12px;font-weight:700;color:#1e293b;">' . csm_h($cleanDisplayPhone ?: 'N/A') . '</div>
@@ -1690,15 +1737,16 @@ if (!function_exists('csm_render_custom_customers_page')) {
                         <strong>' . $currPrefix . number_format((float)$grp['total_recurring'], 2) . $currSuffix . '</strong>
                         <br><small class="text-muted">Total Active/Mo</small>
                     </td>
-                    <td onclick="csmToggleClientRow(\'' . $key . '\')">
+                    <td>
                         ' . $dueDisplayHtml . '
+                        ' . $dueNoteSnippet . '
+                        ' . $editDueBtn . '
                     </td>
-                    <td onclick="csmToggleClientRow(\'' . $key . '\')">
-                        <strong>' . $earliestDueFmt . '</strong>
-                        ' . ($earliestBadge ? '<br>' . $earliestBadge : '') . '
+                    <td>
+                        ' . $paidDateDisplayHtml . '
                     </td>
-                    <td class="text-center" onclick="csmToggleClientRow(\'' . $key . '\')">
-                        <span class="csm-badge csm-badge-' . $clientStatusClass . '">' . csm_h($grp['client_status']) . '</span>
+                    <td class="text-center">
+                        ' . $paidBtn . '
                     </td>
                     <td class="text-center" style="white-space:nowrap;">
                         <button type="button" class="btn btn-primary btn-sm csm-toggle-btn" id="btnToggle_' . $key . '" onclick="csmToggleClientRow(\'' . $key . '\')" style="font-weight:700;">
@@ -2175,6 +2223,76 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     <div class="modal-footer" style="background:#f8fafc;">
                         <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
                         <button type="button" class="btn btn-primary" onclick="csmSaveCustomGraceAjax()"><i class="fas fa-save"></i> Save Deadline</button>
+                    </div>
+                </div>
+            </div>
+        </div>';
+
+        // Modal 5: Edit Corporate Client Alias Modal
+        $html .= '
+        <div class="modal fade" id="csmClientAliasModal" tabindex="-1" role="dialog">
+            <div class="modal-dialog modal-sm" role="document">
+                <div class="modal-content" style="border-radius:8px;">
+                    <div class="modal-header" style="background:#12589b;color:#fff;border-radius:7px 7px 0 0;padding:14px 18px;">
+                        <button type="button" class="close" data-dismiss="modal" style="color:#fff;">&times;</button>
+                        <h4 class="modal-title" style="font-size:15px;font-weight:700;"><i class="fas fa-id-badge"></i> Client Custom Alias</h4>
+                    </div>
+                    <div class="modal-body" style="padding:18px;">
+                        <input type="hidden" id="modalAliasGroupKey" value="">
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label style="font-size:12px;color:#64748b;">Target Client:</label>
+                            <div id="modalAliasClientName" style="font-weight:700;color:#1e293b;"></div>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label style="font-weight:700;color:#334155;">Custom Name / Nickname / Tag:</label>
+                            <input type="text" id="modalAliasInput" class="form-control" placeholder="e.g. VIP Boss / Office Server">
+                            <small class="text-muted" style="font-size:11px;margin-top:4px;display:block;">Will be shown prominently in the Corporate Customer table.</small>
+                        </div>
+                    </div>
+                    <div class="modal-footer" style="background:#f8fafc;padding:12px 18px;">
+                        <button type="button" class="btn btn-default btn-sm" data-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary btn-sm" id="btnSaveAliasAjax" onclick="csmSaveClientAliasAjax()"><i class="fas fa-save"></i> Save Alias</button>
+                    </div>
+                </div>
+            </div>
+        </div>';
+
+        // Modal 6: Edit Corporate Client Due & Note Modal
+        $html .= '
+        <div class="modal fade" id="csmClientDueModal" tabindex="-1" role="dialog">
+            <div class="modal-dialog modal-md" role="document">
+                <div class="modal-content" style="border-radius:8px;">
+                    <div class="modal-header" style="background:#12589b;color:#fff;border-radius:7px 7px 0 0;padding:14px 18px;">
+                        <button type="button" class="close" data-dismiss="modal" style="color:#fff;">&times;</button>
+                        <h4 class="modal-title" style="font-size:15px;font-weight:700;"><i class="fas fa-pen-to-square"></i> Edit Custom Due &amp; Note</h4>
+                    </div>
+                    <div class="modal-body" style="padding:18px;">
+                        <input type="hidden" id="modalDueGroupKey" value="">
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label style="font-size:12px;color:#64748b;">Target Client:</label>
+                            <div id="modalDueClientName" style="font-weight:700;color:#1e293b;"></div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 form-group">
+                                <label style="font-weight:700;color:#334155;">Custom Due Amount (' . csm_h(trim($currPrefix . $currSuffix)) . '):</label>
+                                <input type="number" step="0.01" id="modalDueAmountInput" class="form-control" placeholder="0.00">
+                            </div>
+                            <div class="col-md-6 form-group">
+                                <label style="font-weight:700;color:#334155;">Due Status:</label>
+                                <select id="modalDueStatusInput" class="form-control">
+                                    <option value="unpaid">Unpaid / Pending</option>
+                                    <option value="paid">Paid / Clear</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label style="font-weight:700;color:#334155;">Custom Due Note / Remarks:</label>
+                            <textarea id="modalDueNoteInput" class="form-control" rows="2" placeholder="e.g. Total 3 servers due, 1000 tk advance paid on 12th"></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer" style="background:#f8fafc;padding:12px 18px;">
+                        <button type="button" class="btn btn-default btn-sm" data-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary btn-sm" id="btnSaveDueAjax" onclick="csmSaveClientDueAjax()"><i class="fas fa-save"></i> Save Due Note</button>
                     </div>
                 </div>
             </div>
@@ -2934,6 +3052,157 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     }
                 }
             });
+        // Filter Panel Toggle
+        window.csmToggleFilterPanel = function() {
+            var \$panel = \$("#csmFilterPanel");
+            if (\$panel.is(":visible")) {
+                \$panel.slideUp(180);
+                \$("#csmToggleFilterText").text("Show Search & Filters");
+                \$("#csmToggleFilterBtn").removeClass("btn-primary").addClass("btn-default");
+            } else {
+                \$panel.slideDown(180);
+                \$("#csmToggleFilterText").text("Hide Search & Filters");
+                \$("#csmToggleFilterBtn").removeClass("btn-default").addClass("btn-primary");
+            }
+        };
+
+        // Client Alias Modal & Ajax
+        window.openEditClientAliasModal = function(groupKey, currentAlias, clientName) {
+            \$("#modalAliasGroupKey").val(groupKey);
+            \$("#modalAliasClientName").text(clientName || "Corporate Client");
+            \$("#modalAliasInput").val(currentAlias || "");
+            \$("#btnSaveAliasAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Alias");
+            \$("#csmClientAliasModal").modal("show");
+        };
+
+        window.csmSaveClientAliasAjax = function() {
+            var groupKey = \$("#modalAliasGroupKey").val();
+            var alias = \$("#modalAliasInput").val().trim();
+            \$("#btnSaveAliasAjax").prop("disabled", true).html("<i class=\'fas fa-spinner fa-spin\'></i> Saving...");
+
+            \$.ajax({
+                url: CSM_MODULE_LINK + "&ajax=save_client_alias",
+                type: "POST",
+                data: { group_key: groupKey, alias: alias },
+                dataType: "json",
+                success: function(res) {
+                    \$("#btnSaveAliasAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Alias");
+                    if (res && res.success) {
+                        \$("#csmClientAliasModal").modal("hide");
+                        var \$tag = \$("#csmAliasTag_" + groupKey);
+                        if (alias) {
+                            \$tag.css({"background": "#fef3c7", "color": "#92400e", "border": "1px solid #fde68a"})
+                                .html(\'<i class="fas fa-id-badge text-warning"></i> <span class="csm-alias-val">\' + \$("<div>").text(alias).html() + \'</span> <i class="fas fa-pen" style="font-size:9px;opacity:0.6;"></i>\');
+                        } else {
+                            \$tag.css({"background": "#f1f5f9", "color": "#64748b", "border": "1px dashed #cbd5e1"})
+                                .html(\'<i class="fas fa-plus text-primary"></i> <span class="csm-alias-val">Set Custom Name</span>\');
+                        }
+                        if (typeof Swal !== "undefined") {
+                            const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 2000 });
+                            Toast.fire({ icon: "success", title: "Custom alias saved" });
+                        }
+                    } else {
+                        alert(res.error || "Failed to save alias");
+                    }
+                },
+                error: function() {
+                    \$("#btnSaveAliasAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Alias");
+                    alert("Network error saving alias");
+                }
+            });
+        };
+
+        // Client Due Modal & Ajax
+        window.openEditClientDueModal = function(groupKey, currentAmount, currentNote, clientName) {
+            \$("#modalDueGroupKey").val(groupKey);
+            \$("#modalDueClientName").text(clientName || "Corporate Client");
+            \$("#modalDueAmountInput").val(currentAmount || "0.00");
+            \$("#modalDueStatusInput").val(parseFloat(currentAmount) > 0 ? "unpaid" : "paid");
+            \$("#modalDueNoteInput").val(currentNote || "");
+            \$("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due Note");
+            \$("#csmClientDueModal").modal("show");
+        };
+
+        window.csmSaveClientDueAjax = function() {
+            var groupKey = \$("#modalDueGroupKey").val();
+            var amount = \$("#modalDueAmountInput").val() || "0.00";
+            var note = \$("#modalDueNoteInput").val().trim();
+            \$("#btnSaveDueAjax").prop("disabled", true).html("<i class=\'fas fa-spinner fa-spin\'></i> Saving...");
+
+            \$.ajax({
+                url: CSM_MODULE_LINK + "&ajax=save_client_due",
+                type: "POST",
+                data: { group_key: groupKey, due_amount: amount, due_note: note },
+                dataType: "json",
+                success: function(res) {
+                    \$("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due Note");
+                    if (res && res.success) {
+                        \$("#csmClientDueModal").modal("hide");
+                        if (typeof Swal !== "undefined") {
+                            const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 2000 });
+                            Toast.fire({ icon: "success", title: "Custom due note updated" });
+                        }
+                        setTimeout(function() { window.location.reload(); }, 700);
+                    } else {
+                        alert(res.error || "Failed to save due note");
+                    }
+                },
+                error: function() {
+                    \$("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due Note");
+                    alert("Network error saving due note");
+                }
+            });
+        };
+
+        // Quick Mark Paid
+        window.csmQuickMarkPaid = function(groupKey, clientName) {
+            function doMarkPaid() {
+                var \$btn = \$("#btnPaid_" + groupKey);
+                \$btn.prop("disabled", true).html("<i class=\'fas fa-spinner fa-spin\'></i>");
+
+                \$.ajax({
+                    url: CSM_MODULE_LINK + "&ajax=quick_mark_paid",
+                    type: "POST",
+                    data: { group_key: groupKey },
+                    dataType: "json",
+                    success: function(res) {
+                        \$btn.prop("disabled", false).html("<i class=\'fas fa-check\'></i> Paid");
+                        if (res && res.success) {
+                            if (typeof Swal !== "undefined") {
+                                const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 2500 });
+                                Toast.fire({ icon: "success", title: "Marked as Paid successfully!" });
+                            }
+                            setTimeout(function() { window.location.reload(); }, 700);
+                        } else {
+                            alert(res.error || "Failed to mark paid");
+                        }
+                    },
+                    error: function() {
+                        \$btn.prop("disabled", false).html("<i class=\'fas fa-check\'></i> Paid");
+                        alert("Network error");
+                    }
+                });
+            }
+
+            if (typeof Swal !== "undefined") {
+                Swal.fire({
+                    title: "Confirm Bill Payment?",
+                    text: "Mark all custom dues as Paid for " + clientName + " for today?",
+                    icon: "question",
+                    showCancelButton: true,
+                    confirmButtonColor: "#16a34a",
+                    cancelButtonColor: "#64748b",
+                    confirmButtonText: "Yes, Mark Paid"
+                }).then(function(result) {
+                    if (result.isConfirmed) {
+                        doMarkPaid();
+                    }
+                });
+            } else {
+                if (confirm("Mark all custom dues as Paid for " + clientName + " for today?")) {
+                    doMarkPaid();
+                }
+            }
         };
         </script>';
 
@@ -3510,6 +3779,133 @@ if (!function_exists('client_services_monitor_output')) {
             exit;
         }
 
+        // AJAX Save Custom Client Alias / Tag
+        if (isset($_GET['ajax']) && $_GET['ajax'] === 'save_client_alias' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+            while (ob_get_level() > 0) { ob_end_clean(); }
+            header('Content-Type: application/json');
+            $groupKey = trim($_POST['group_key'] ?? '');
+            $alias = trim($_POST['alias'] ?? '');
+            $now = date('Y-m-d H:i:s');
+
+            if (strpos($groupKey, 'client_') === 0) {
+                $uId = (int)str_replace('client_', '', $groupKey);
+                if ($uId > 0) {
+                    Capsule::table('mod_csm_monitored_clients')->updateOrInsert(
+                        ['userid' => $uId],
+                        ['custom_alias_name' => $alias, 'updated_at' => $now]
+                    );
+                    echo json_encode(['success' => true, 'alias' => $alias]);
+                    exit;
+                }
+            } elseif (strpos($groupKey, 'offline_') === 0) {
+                $cId = (int)str_replace('offline_', '', $groupKey);
+                if ($cId > 0) {
+                    Capsule::table('mod_csm_custom_customers')->where('id', $cId)->update([
+                        'custom_alias_name' => $alias,
+                        'updated_at' => $now
+                    ]);
+                    echo json_encode(['success' => true, 'alias' => $alias]);
+                    exit;
+                }
+            }
+            echo json_encode(['success' => false, 'error' => 'Invalid client key']);
+            exit;
+        }
+
+        // AJAX Save Custom Due Note / Amount
+        if (isset($_GET['ajax']) && $_GET['ajax'] === 'save_client_due' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+            while (ob_get_level() > 0) { ob_end_clean(); }
+            header('Content-Type: application/json');
+            $groupKey = trim($_POST['group_key'] ?? '');
+            $amount = isset($_POST['due_amount']) ? (float)$_POST['due_amount'] : 0.00;
+            $note = trim($_POST['due_note'] ?? '');
+            $now = date('Y-m-d H:i:s');
+
+            if (strpos($groupKey, 'client_') === 0) {
+                $uId = (int)str_replace('client_', '', $groupKey);
+                if ($uId > 0) {
+                    Capsule::table('mod_csm_monitored_clients')->updateOrInsert(
+                        ['userid' => $uId],
+                        [
+                            'custom_due_amount' => $amount,
+                            'custom_due_note'   => $note,
+                            'paid_status'       => ($amount > 0 ? 'unpaid' : 'paid'),
+                            'updated_at'        => $now
+                        ]
+                    );
+                    echo json_encode(['success' => true]);
+                    exit;
+                }
+            } elseif (strpos($groupKey, 'offline_') === 0) {
+                $cId = (int)str_replace('offline_', '', $groupKey);
+                if ($cId > 0) {
+                    Capsule::table('mod_csm_custom_customers')->where('id', $cId)->update([
+                        'amount'          => $amount,
+                        'custom_due_note' => $note,
+                        'status'          => ($amount > 0 ? 'Unpaid' : 'Paid'),
+                        'updated_at'      => $now
+                    ]);
+                    echo json_encode(['success' => true]);
+                    exit;
+                }
+            }
+            echo json_encode(['success' => false, 'error' => 'Invalid client key']);
+            exit;
+        }
+
+        // AJAX Quick Mark Paid
+        if (isset($_GET['ajax']) && $_GET['ajax'] === 'quick_mark_paid' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+            while (ob_get_level() > 0) { ob_end_clean(); }
+            header('Content-Type: application/json');
+            $groupKey = trim($_POST['group_key'] ?? '');
+            $paidDate = !empty($_POST['paid_date']) ? trim($_POST['paid_date']) : date('Y-m-d');
+            $now = date('Y-m-d H:i:s');
+
+            if (strpos($groupKey, 'client_') === 0) {
+                $uId = (int)str_replace('client_', '', $groupKey);
+                if ($uId > 0) {
+                    Capsule::table('mod_csm_monitored_clients')->updateOrInsert(
+                        ['userid' => $uId],
+                        [
+                            'custom_due_amount' => 0.00,
+                            'last_paid_date'    => $paidDate,
+                            'paid_status'       => 'paid',
+                            'updated_at'        => $now
+                        ]
+                    );
+                    $adminName = isset($_SESSION['adminname']) ? $_SESSION['adminname'] : 'Admin';
+                    $adminId = isset($_SESSION['adminid']) ? (int)$_SESSION['adminid'] : 0;
+                    Capsule::table('mod_csm_service_notes')->insert([
+                        'rel_type'    => 'service',
+                        'rel_id'      => $uId,
+                        'note'        => 'Bill Paid confirmed on ' . date('d/m/Y', strtotime($paidDate)),
+                        'paid_amount' => 0.00,
+                        'due_amount'  => 0.00,
+                        'admin_id'    => $adminId,
+                        'admin_name'  => $adminName,
+                        'created_at'  => $now,
+                        'updated_at'  => $now
+                    ]);
+                    echo json_encode(['success' => true, 'paid_date' => date('d/m/Y', strtotime($paidDate))]);
+                    exit;
+                }
+            } elseif (strpos($groupKey, 'offline_') === 0) {
+                $cId = (int)str_replace('offline_', '', $groupKey);
+                if ($cId > 0) {
+                    Capsule::table('mod_csm_custom_customers')->where('id', $cId)->update([
+                        'amount'          => 0.00,
+                        'last_paid_date'  => $paidDate,
+                        'status'          => 'Paid',
+                        'updated_at'      => $now
+                    ]);
+                    echo json_encode(['success' => true, 'paid_date' => date('d/m/Y', strtotime($paidDate))]);
+                    exit;
+                }
+            }
+            echo json_encode(['success' => false, 'error' => 'Invalid client key']);
+            exit;
+        }
+
         // AJAX Fetch Client Services & Domains for Custom Monitor Configuration
         if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_client_items') {
             while (ob_get_level() > 0) {
@@ -3882,8 +4278,8 @@ if (!function_exists('client_services_monitor_output')) {
             exit;
         }
 
-        if (!in_array($action, ['live_monitor', 'custom_customers', 'suspension_manager', 'due_notes', 'module_setup', 'changelog', 'developer_info'], true)) {
-            $action = 'live_monitor';
+        if (!in_array($action, ['custom_customers', 'live_monitor', 'suspension_manager', 'due_notes', 'module_setup', 'changelog', 'developer_info'], true)) {
+            $action = 'custom_customers';
         }
 
         echo csm_render_header($vars, $action);
