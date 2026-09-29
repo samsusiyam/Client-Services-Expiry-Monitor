@@ -1694,6 +1694,17 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     <button type="button" class="btn btn-default btn-sm" onclick="csmCollapseAllClients()" style="font-weight:700;"><i class="fas fa-folder text-muted"></i> Collapse All</button>
                 </div>
             </div>
+
+            <!-- 1-Click Quick Filter Bar -->
+            <div style="padding:10px 20px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+                <span style="font-size:11.5px;font-weight:700;color:#64748b;text-transform:uppercase;margin-right:4px;"><i class="fas fa-bolt text-warning"></i> Quick Filter:</span>
+                <button type="button" class="btn btn-default btn-xs csm-quick-chip active" id="chip_all" onclick="csmQuickFilter(\'all\')" style="font-weight:700;border-radius:20px;padding:3px 12px;border:1px solid #cbd5e1;">All Clients (' . $totalClientsCount . ')</button>
+                <button type="button" class="btn btn-default btn-xs csm-quick-chip" id="chip_unpaid" onclick="csmQuickFilter(\'unpaid\')" style="font-weight:700;border-radius:20px;padding:3px 12px;border:1px solid #fecaca;color:#dc2626;"><i class="fas fa-circle-exclamation text-danger"></i> Unpaid Only (' . $globalMonthUnpaidCount . ')</button>
+                <button type="button" class="btn btn-default btn-xs csm-quick-chip" id="chip_paid" onclick="csmQuickFilter(\'paid\')" style="font-weight:700;border-radius:20px;padding:3px 12px;border:1px solid #bbf7d0;color:#16a34a;"><i class="fas fa-circle-check text-success"></i> Paid (' . $globalMonthPaidCount . ')</button>
+                <button type="button" class="btn btn-default btn-xs csm-quick-chip" id="chip_today" onclick="csmQuickFilter(\'today\')" style="font-weight:700;border-radius:20px;padding:3px 12px;border:1px solid #fed7aa;color:#ea580c;"><i class="fas fa-calendar-day text-warning"></i> Due Today (' . $globalDueTodayCount . ')</button>
+                <button type="button" class="btn btn-default btn-xs csm-quick-chip" id="chip_overdue" onclick="csmQuickFilter(\'overdue\')" style="font-weight:700;border-radius:20px;padding:3px 12px;border:1px solid #fecaca;color:#dc2626;"><i class="fas fa-clock text-danger"></i> Overdue (' . $globalOverdueCount . ')</button>
+            </div>
+
             <div style="overflow-x:auto;">
                 <table class="csm-table" id="csmCustomMonitorTable">
                     <thead>
@@ -1905,6 +1916,10 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     . ' data-statuses="' . csm_h($statusesStr) . '"'
                     . ' data-due="' . csm_h($grp['earliest_due_cat']) . '"'
                     . ' data-duedays="' . (int)$grp['earliest_due_days'] . '"'
+                    . ' data-monthstatus="' . csm_h($mStatus) . '"'
+                    . ' data-monthdue="' . (float)$mDue . '"'
+                    . ' data-monthpaid="' . (float)$mPaid . '"'
+                    . ' data-monthrecurring="' . (float)$mRecurring . '"'
                     . ' style="cursor:pointer;background:#ffffff;transition:background 0.15s ease;">
                     <td onclick="csmToggleClientRow(\'' . $key . '\')">
                         <strong>' . ($isWhmcs ? '#' . $userId : '<span class="label label-default">Offline</span>') . '</strong>
@@ -2907,14 +2922,34 @@ if (!function_exists('csm_render_custom_customers_page')) {
             applyCustomMonitorFilters();
         };
 
-        window.csmFilterCustom = function(statusVal) {
-            if (statusVal === "due7days" || statusVal === "today" || statusVal === "overdue") {
-                $("#filterCustomDueStatus").val(statusVal === "due7days" ? "7days" : statusVal);
-            } else {
-                resetCustomMonitorFilters();
-                return;
-            }
+        var activeQuickChip = "all";
+
+        window.csmQuickFilter = function(chipType) {
+            activeQuickChip = chipType || "all";
+            $(".csm-quick-chip").removeClass("active btn-primary").addClass("btn-default");
+            $("#chip_" + activeQuickChip).addClass("active btn-primary").removeClass("btn-default");
             applyCustomMonitorFilters();
+        };
+
+        window.csmFilterCustom = function(statusVal) {
+            if (statusVal === "unpaid") {
+                csmQuickFilter("unpaid");
+            } else if (statusVal === "paid") {
+                csmQuickFilter("paid");
+            } else if (statusVal === "today") {
+                csmQuickFilter("today");
+            } else if (statusVal === "overdue") {
+                csmQuickFilter("overdue");
+            } else if (statusVal === "due7days") {
+                $("#filterCustomDueStatus").val("7days");
+                activeQuickChip = "all";
+                $(".csm-quick-chip").removeClass("active btn-primary").addClass("btn-default");
+                $("#chip_all").addClass("active btn-primary").removeClass("btn-default");
+                applyCustomMonitorFilters();
+            } else {
+                csmQuickFilter("all");
+                resetCustomMonitorFilters();
+            }
         };
 
         function applyCustomMonitorFilters() {
@@ -2935,12 +2970,26 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 var rowServerIds = ($masterRow.data("serverids") || "").toString().split(",");
                 var rowDueDays = parseInt($masterRow.data("duedays"), 10);
                 var rowDueCat = $masterRow.data("due") || "normal";
+                var rowMonthStatus = ($masterRow.data("monthstatus") || "").toString().toLowerCase();
+                var rowMonthDue = parseFloat($masterRow.data("monthdue") || 0);
 
                 var matchesSearch = !search || rowSearch.indexOf(search) > -1;
                 var matchesClient = !clientFilter || (groupKey === clientFilter);
                 var matchesType = !typeFilter || rowProductTypes.indexOf(typeFilter) > -1;
                 var matchesCycle = !cycleFilter || cycleFilter === "Any" || rowBillingCycles.indexOf(cycleFilter.toLowerCase()) > -1;
                 var matchesServer = (serverFilter === "0" || !serverFilter) || (rowServerIds.indexOf(serverFilter) > -1);
+
+                // Quick Chip filter match
+                var matchesChip = true;
+                if (activeQuickChip === "unpaid") {
+                    matchesChip = (rowMonthStatus !== "paid" || rowMonthDue > 0);
+                } else if (activeQuickChip === "paid") {
+                    matchesChip = (rowMonthStatus === "paid" && rowMonthDue <= 0);
+                } else if (activeQuickChip === "today") {
+                    matchesChip = (rowDueDays === 0);
+                } else if (activeQuickChip === "overdue") {
+                    matchesChip = (rowDueDays < 0);
+                }
 
                 var matchesDue = true;
                 if (dueFilter) {
@@ -2959,7 +3008,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     }
                 }
 
-                if (matchesSearch && matchesClient && matchesType && matchesCycle && matchesServer && matchesDue) {
+                if (matchesSearch && matchesClient && matchesType && matchesCycle && matchesServer && matchesDue && matchesChip) {
                     $masterRow.show();
                     visibleCount++;
 
