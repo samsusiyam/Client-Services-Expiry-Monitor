@@ -1793,11 +1793,11 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 $mStatus = $grp['month_status'];
                 $monthStatusBadge = '';
                 if ($mStatus === 'paid') {
-                    $monthStatusBadge = '<span class="label label-success" style="font-size:10.5px;font-weight:700;padding:2px 7px;display:inline-block;margin-top:3px;"><i class="fas fa-circle-check"></i> ' . $selectedMonthName . ': Paid</span>';
+                    $monthStatusBadge = '<span class="label label-success" style="font-size:10px;font-weight:700;padding:2px 7px;display:inline-block;margin-top:3px;"><i class="fas fa-circle-check"></i> ' . $selectedMonthName . ': Paid</span>';
                 } elseif ($mStatus === 'partial') {
-                    $monthStatusBadge = '<span class="label label-warning" style="font-size:10.5px;font-weight:700;padding:2px 7px;display:inline-block;margin-top:3px;background:#f59e0b;"><i class="fas fa-circle-half-stroke"></i> ' . $selectedMonthName . ': Partial (Due ' . $currPrefix . number_format($grp['month_due'], 2) . $currSuffix . ')</span>';
+                    $monthStatusBadge = '<span class="label label-warning" style="font-size:10px;font-weight:700;padding:2px 7px;display:inline-block;margin-top:3px;background:#f59e0b;"><i class="fas fa-circle-half-stroke"></i> ' . $selectedMonthName . ': Partial</span>';
                 } else {
-                    $monthStatusBadge = '<span class="label label-danger" style="font-size:10.5px;font-weight:700;padding:2px 7px;display:inline-block;margin-top:3px;"><i class="fas fa-circle-xmark"></i> ' . $selectedMonthName . ': Unpaid (Due ' . $currPrefix . number_format($grp['month_due'], 2) . $currSuffix . ')</span>';
+                    $monthStatusBadge = '<span class="label label-danger" style="font-size:10px;font-weight:700;padding:2px 7px;display:inline-block;margin-top:3px;"><i class="fas fa-circle-xmark"></i> ' . $selectedMonthName . ': Unpaid</span>';
                 }
 
                 $clientContactCell = '';
