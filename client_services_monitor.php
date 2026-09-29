@@ -1730,7 +1730,6 @@ if (!function_exists('csm_render_custom_customers_page')) {
                 <table class="csm-table" id="csmCustomMonitorTable">
                     <thead>
                         <tr>
-                            <th width="75">Client ID</th>
                             <th>Client &amp; Contact</th>
                             <th>Phone / WhatsApp</th>
                             <th class="text-center" width="100">Products</th>
@@ -1744,7 +1743,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     <tbody id="csmCustomMonitorTableBody">';
 
         if (empty($clientGroups)) {
-            $html .= '<tr id="csmCustomEmptyRow"><td colspan="9" style="text-align:center;padding:50px;color:#64748b;">
+            $html .= '<tr id="csmCustomEmptyRow"><td colspan="8" style="text-align:center;padding:50px;color:#64748b;">
                 <i class="fas fa-users-gear" style="font-size:38px;margin-bottom:12px;display:block;opacity:0.4;"></i>
                 <p style="font-size:15px;font-weight:700;color:#334155;margin-bottom:6px;">No corporate clients to display</p>
                 <p style="margin-bottom:14px;">Click <strong>"Add Clients to Monitor"</strong> above to select the specific WHMCS clients you want to track.</p>
@@ -1943,9 +1942,6 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     . ' data-monthrecurring="' . (float)$mRecurring . '"'
                     . ' style="cursor:pointer;background:#ffffff;transition:background 0.15s ease;">
                     <td onclick="csmToggleClientRow(\'' . $key . '\')">
-                        <strong>' . ($isWhmcs ? '#' . $userId : '<span class="label label-default">Offline</span>') . '</strong>
-                    </td>
-                    <td onclick="csmToggleClientRow(\'' . $key . '\')">
                         ' . $clientContactCell . '
                     </td>
                     <td>
@@ -1985,7 +1981,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
                 // 2. Render Expandable Child Row (Nested Products & Services Table)
                 $html .= '<tr class="csm-client-child-row" id="csmChildRow_' . $key . '" style="display:none;">
-                    <td colspan="9" style="padding:0;background:#f8fafc;border-top:none;border-bottom:2px solid #cbd5e1;">
+                    <td colspan="8" style="padding:0;background:#f8fafc;border-top:none;border-bottom:2px solid #cbd5e1;">
                         <div class="csm-child-wrap" style="padding:16px 20px;background:#f8fafc;">
                             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
                                 <div>
@@ -3097,7 +3093,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
             if (visibleCount === 0 && $(".csm-client-master-row").length > 0) {
                 if ($("#csmCustomNoMatchRow").length === 0) {
-                    $("#csmCustomMonitorTableBody").append("<tr id=\'csmCustomNoMatchRow\'><td colspan=\'9\' style=\'text-align:center;padding:35px;color:#64748b;font-weight:600;\'><i class=\'fas fa-search\'></i> No monitored clients match your filter criteria. <a href=\'javascript:void(0)\' onclick=\'resetCustomMonitorFilters()\' style=\'color:#0284c7;text-decoration:underline;margin-left:6px;\'>Reset Filters</a></td></tr>");
+                    $("#csmCustomMonitorTableBody").append("<tr id=\'csmCustomNoMatchRow\'><td colspan=\'8\' style=\'text-align:center;padding:35px;color:#64748b;font-weight:600;\'><i class=\'fas fa-search\'></i> No monitored clients match your filter criteria. <a href=\'javascript:void(0)\' onclick=\'resetCustomMonitorFilters()\' style=\'color:#0284c7;text-decoration:underline;margin-left:6px;\'>Reset Filters</a></td></tr>");
                 }
                 $("#csmCustomNoMatchRow").show();
             } else {
