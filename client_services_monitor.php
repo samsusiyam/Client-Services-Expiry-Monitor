@@ -1361,18 +1361,36 @@ if (!function_exists('csm_render_custom_customers_page')) {
         }
         unset($grp);
 
-        // Sort Corporate Clients: Unpaid Dues first, then earliest/empty last_paid_date first, then client name
+        // Sort Corporate Clients:
+        // 1. Unpaid Clients (due > 0 or paid_status != 'paid') at the Top
+        //    - Within Unpaid: Sorted by Bill Pay Date ASC (overdue/earliest dates first; no-date at end of unpaid list), then Due Amount DESC
+        // 2. Paid Clients (due == 0 and paid_status == 'paid') at the Bottom
+        //    - Within Paid: Sorted by Bill Pay Date DESC (most recent paid first)
         uasort($clientGroups, function ($a, $b) {
-            $isUnpaidA = ($a['custom_due_amount'] > 0 || strtolower($a['paid_status']) !== 'paid') ? 1 : 0;
-            $isUnpaidB = ($b['custom_due_amount'] > 0 || strtolower($b['paid_status']) !== 'paid') ? 1 : 0;
+            $isUnpaidA = ((float)$a['custom_due_amount'] > 0 || strtolower($a['paid_status'] ?? '') !== 'paid') ? 1 : 0;
+            $isUnpaidB = ((float)$b['custom_due_amount'] > 0 || strtolower($b['paid_status'] ?? '') !== 'paid') ? 1 : 0;
             if ($isUnpaidA !== $isUnpaidB) {
-                return $isUnpaidB - $isUnpaidA;
+                return $isUnpaidB - $isUnpaidA; // Unpaid (1) before Paid (0)
             }
 
-            $dateA = !empty($a['last_paid_date']) && $a['last_paid_date'] !== '0000-00-00' ? $a['last_paid_date'] : '0000-00-00';
-            $dateB = !empty($b['last_paid_date']) && $b['last_paid_date'] !== '0000-00-00' ? $b['last_paid_date'] : '0000-00-00';
-            if ($dateA !== $dateB) {
-                return strcmp($dateA, $dateB);
+            if ($isUnpaidA === 1) {
+                // Both are Unpaid: Earliest Bill Pay Date (Overdue / Today / Upcoming) on top!
+                $dateA = (!empty($a['last_paid_date']) && $a['last_paid_date'] !== '0000-00-00') ? $a['last_paid_date'] : '9999-99-99';
+                $dateB = (!empty($b['last_paid_date']) && $b['last_paid_date'] !== '0000-00-00') ? $b['last_paid_date'] : '9999-99-99';
+                if ($dateA !== $dateB) {
+                    return strcmp($dateA, $dateB);
+                }
+                // If same date, higher due amount first
+                if ((float)$a['custom_due_amount'] !== (float)$b['custom_due_amount']) {
+                    return ((float)$b['custom_due_amount'] > (float)$a['custom_due_amount']) ? 1 : -1;
+                }
+            } else {
+                // Both are Paid: Most recently paid date on top
+                $dateA = (!empty($a['last_paid_date']) && $a['last_paid_date'] !== '0000-00-00') ? $a['last_paid_date'] : '0000-00-00';
+                $dateB = (!empty($b['last_paid_date']) && $b['last_paid_date'] !== '0000-00-00') ? $b['last_paid_date'] : '0000-00-00';
+                if ($dateA !== $dateB) {
+                    return strcmp($dateB, $dateA);
+                }
             }
 
             return strcmp($a['client_name'], $b['client_name']);
@@ -1646,19 +1664,43 @@ if (!function_exists('csm_render_custom_customers_page')) {
 
                 $dueNoteSnippet = !empty($customDueNote) ? '<div id="csmDueNoteDisplay_' . $key . '" style="font-size:11.5px;color:#475569;margin-top:2px;max-width:200px;word-break:break-word;"><i class="fas fa-note-sticky text-info"></i> ' . csm_h($customDueNote) . '</div>' : '<div id="csmDueNoteDisplay_' . $key . '" style="font-size:11px;color:#94a3b8;margin-top:2px;">No remarks</div>';
 
-                $editDueBtn = '<button type="button" class="btn btn-default btn-xs" onclick="event.stopPropagation(); openEditClientDueModal(\'' . $key . '\', ' . $customDueAmount . ', \'' . csm_h(addslashes($customDueNote)) . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\')" style="margin-top:4px;font-size:11px;" title="Edit Custom Due &amp; Note"><i class="fas fa-pen-to-square text-primary"></i> Edit Due</button>';
+                $editDueBtn = '<button type="button" class="btn btn-default btn-xs" onclick="event.stopPropagation(); openEditClientDueModal(\'' . $key . '\', ' . $customDueAmount . ', \'' . csm_h(addslashes($customDueNote)) . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\', \'' . csm_h(addslashes($grp['last_paid_date'] ?: '')) . '\', \'' . csm_h(addslashes($grp['paid_status'] ?: '')) . '\')" style="margin-top:4px;font-size:11px;" title="Edit Custom Due, Note &amp; Bill Pay Date"><i class="fas fa-pen-to-square text-primary"></i> Edit Due</button>';
 
-                // Bill Paid Date display
-                $lastPaidDate = $grp['last_paid_date'];
-                $paidDateDisplayHtml = '';
-                if (!empty($lastPaidDate) && $lastPaidDate !== '0000-00-00') {
-                    $pTs = strtotime($lastPaidDate);
-                    $diffPaid = (int)round(($todayTs - $pTs) / 86400);
-                    $paidDateFmt = date('d/m/Y', $pTs);
-                    $paidBadge = ($diffPaid === 0) ? '<span class="label label-warning" style="font-size:10px;">Paid Today</span>' : '<span class="label label-success" style="font-size:10px;">Paid ' . $diffPaid . 'd ago</span>';
-                    $paidDateDisplayHtml = '<strong id="csmPaidDateDisplay_' . $key . '">' . $paidDateFmt . '</strong><br><span id="csmPaidBadgeDisplay_' . $key . '">' . $paidBadge . '</span>';
+                // Bill Pay Date display (কবে বিল পে করবে / Paid Date)
+                $billPayDate = $grp['last_paid_date'];
+                $hasDate = (!empty($billPayDate) && $billPayDate !== '0000-00-00');
+                $isUnpaid = ($customDueAmount > 0 || strtolower($grp['paid_status'] ?? '') !== 'paid');
+
+                if ($hasDate) {
+                    $pTs = strtotime($billPayDate);
+                    $diffDays = (int)round(($pTs - $todayTs) / 86400);
+                    $dateFmt = date('d/m/Y', $pTs);
+
+                    if (!$isUnpaid) {
+                        $paidBadge = '<span class="label label-success" style="font-size:10px;"><i class="fas fa-check"></i> Paid</span>';
+                        $dateColor = '#16a34a';
+                    } else {
+                        if ($diffDays < 0) {
+                            $absDays = abs($diffDays);
+                            $paidBadge = '<span class="label label-danger" style="font-size:10px;"><i class="fas fa-triangle-exclamation"></i> Overdue ' . $absDays . 'd</span>';
+                            $dateColor = '#dc2626';
+                        } elseif ($diffDays === 0) {
+                            $paidBadge = '<span class="label label-warning" style="font-size:10px;background:#f59e0b;"><i class="fas fa-calendar-day"></i> Pay Today</span>';
+                            $dateColor = '#d97706';
+                        } else {
+                            $paidBadge = '<span class="label label-info" style="font-size:10px;background:#0284c7;"><i class="fas fa-calendar-alt"></i> In ' . $diffDays . 'd</span>';
+                            $dateColor = '#0f5ea8';
+                        }
+                    }
+                    $paidDateDisplayHtml = '<div onclick="event.stopPropagation(); openEditClientDueModal(\'' . $key . '\', ' . $customDueAmount . ', \'' . csm_h(addslashes($customDueNote)) . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\', \'' . csm_h(addslashes($billPayDate)) . '\', \'' . csm_h(addslashes($grp['paid_status'] ?: '')) . '\')" style="cursor:pointer;" title="Click to edit Bill Pay Date">'
+                        . '<strong id="csmPaidDateDisplay_' . $key . '" style="color:' . $dateColor . ';font-size:13px;"><i class="fas fa-calendar-check" style="font-size:11px;margin-right:3px;"></i> ' . $dateFmt . '</strong>'
+                        . '<br><span id="csmPaidBadgeDisplay_' . $key . '">' . $paidBadge . '</span>'
+                        . '</div>';
                 } else {
-                    $paidDateDisplayHtml = '<span id="csmPaidDateDisplay_' . $key . '" class="text-muted" style="font-size:12px;">Not Recorded</span><br><span id="csmPaidBadgeDisplay_' . $key . '"></span>';
+                    $paidDateDisplayHtml = '<div onclick="event.stopPropagation(); openEditClientDueModal(\'' . $key . '\', ' . $customDueAmount . ', \'' . csm_h(addslashes($customDueNote)) . '\', \'' . csm_h(addslashes($grp['client_name'])) . '\', \'\', \'' . csm_h(addslashes($grp['paid_status'] ?: '')) . '\')" style="cursor:pointer;" title="Click to set Bill Pay Date">'
+                        . '<span id="csmPaidDateDisplay_' . $key . '" style="color:#0284c7;font-size:12px;font-weight:600;"><i class="fas fa-calendar-plus"></i> Set Date</span>'
+                        . '<br><span id="csmPaidBadgeDisplay_' . $key . '" class="label label-default" style="font-size:9px;">Not Set</span>'
+                        . '</div>';
                 }
 
                 // Quick Mark Paid Action Button
@@ -2285,14 +2327,19 @@ if (!function_exists('csm_render_custom_customers_page')) {
                                 </select>
                             </div>
                         </div>
+                        <div class="form-group" style="margin-bottom:14px;">
+                            <label style="font-weight:700;color:#334155;"><i class="fas fa-calendar-alt text-primary"></i> Bill Pay Date (কবে বিল পে করবে / Paid Date):</label>
+                            <input type="date" id="modalDuePaidDateInput" class="form-control">
+                            <small class="text-muted" style="font-size:11.5px;">Expected bill payment date (used for auto sorting table rows).</small>
+                        </div>
                         <div class="form-group" style="margin-bottom:0;">
                             <label style="font-weight:700;color:#334155;">Custom Due Note / Remarks:</label>
-                            <textarea id="modalDueNoteInput" class="form-control" rows="2" placeholder="e.g. Total 3 servers due, 1000 tk advance paid on 12th"></textarea>
+                            <textarea id="modalDueNoteInput" class="form-control" rows="2" placeholder="e.g. Total 3 servers due, promises to pay on 25th"></textarea>
                         </div>
                     </div>
                     <div class="modal-footer" style="background:#f8fafc;padding:12px 18px;">
                         <button type="button" class="btn btn-default btn-sm" data-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-primary btn-sm" id="btnSaveDueAjax" onclick="csmSaveClientDueAjax()"><i class="fas fa-save"></i> Save Due Note</button>
+                        <button type="button" class="btn btn-primary btn-sm" id="btnSaveDueAjax" onclick="csmSaveClientDueAjax()"><i class="fas fa-save"></i> Save Due &amp; Date</button>
                     </div>
                 </div>
             </div>
@@ -3114,35 +3161,38 @@ if (!function_exists('csm_render_custom_customers_page')) {
             });
         };
 
-        // Client Due Modal & Ajax
-        window.openEditClientDueModal = function(groupKey, currentAmount, currentNote, clientName) {
+        // Client Due Modal & Ajax (with Bill Pay Date support)
+        window.openEditClientDueModal = function(groupKey, currentAmount, currentNote, clientName, currentPaidDate, currentStatus) {
             $("#modalDueGroupKey").val(groupKey);
             $("#modalDueClientName").text(clientName || "Corporate Client");
-            $("#modalDueAmountInput").val(currentAmount || "0.00");
-            $("#modalDueStatusInput").val(parseFloat(currentAmount) > 0 ? "unpaid" : "paid");
+            $("#modalDueAmountInput").val(currentAmount !== undefined ? currentAmount : "0.00");
+            $("#modalDueStatusInput").val(currentStatus || (parseFloat(currentAmount) > 0 ? "unpaid" : "paid"));
+            $("#modalDuePaidDateInput").val(currentPaidDate || "");
             $("#modalDueNoteInput").val(currentNote || "");
-            $("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due Note");
+            $("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due &amp; Date");
             $("#csmClientDueModal").modal("show");
         };
 
         window.csmSaveClientDueAjax = function() {
             var groupKey = $("#modalDueGroupKey").val();
             var amount = $("#modalDueAmountInput").val() || "0.00";
+            var status = $("#modalDueStatusInput").val() || "unpaid";
+            var paidDate = $("#modalDuePaidDateInput").val() || "";
             var note = $("#modalDueNoteInput").val().trim();
             $("#btnSaveDueAjax").prop("disabled", true).html("<i class=\'fas fa-spinner fa-spin\'></i> Saving...");
 
             $.ajax({
                 url: CSM_MODULE_LINK + "&ajax=save_client_due",
                 type: "POST",
-                data: { group_key: groupKey, due_amount: amount, due_note: note },
+                data: { group_key: groupKey, due_amount: amount, paid_status: status, last_paid_date: paidDate, due_note: note },
                 dataType: "json",
                 success: function(res) {
-                    $("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due Note");
+                    $("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due &amp; Date");
                     if (res && res.success) {
                         $("#csmClientDueModal").modal("hide");
                         if (typeof Swal !== "undefined") {
                             const Toast = Swal.mixin({ toast: true, position: "top-end", showConfirmButton: false, timer: 2000 });
-                            Toast.fire({ icon: "success", title: "Custom due note updated" });
+                            Toast.fire({ icon: "success", title: "Custom due & Bill Pay Date updated" });
                         }
                         setTimeout(function() { window.location.reload(); }, 700);
                     } else {
@@ -3150,7 +3200,7 @@ if (!function_exists('csm_render_custom_customers_page')) {
                     }
                 },
                 error: function() {
-                    $("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due Note");
+                    $("#btnSaveDueAjax").prop("disabled", false).html("<i class=\'fas fa-save\'></i> Save Due &amp; Date");
                     alert("Network error saving due note");
                 }
             });
@@ -3814,26 +3864,32 @@ if (!function_exists('client_services_monitor_output')) {
             exit;
         }
 
-        // AJAX Save Custom Due Note / Amount
+        // AJAX Save Custom Due Note / Amount / Bill Pay Date
         if (isset($_GET['ajax']) && $_GET['ajax'] === 'save_client_due' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             while (ob_get_level() > 0) { ob_end_clean(); }
             header('Content-Type: application/json');
             $groupKey = trim($_POST['group_key'] ?? '');
             $amount = isset($_POST['due_amount']) ? (float)$_POST['due_amount'] : 0.00;
             $note = trim($_POST['due_note'] ?? '');
+            $paidDate = !empty($_POST['last_paid_date']) ? trim($_POST['last_paid_date']) : (!empty($_POST['paid_date']) ? trim($_POST['paid_date']) : null);
+            $status = !empty($_POST['paid_status']) ? trim($_POST['paid_status']) : ($amount > 0 ? 'unpaid' : 'paid');
             $now = date('Y-m-d H:i:s');
 
             if (strpos($groupKey, 'client_') === 0) {
                 $uId = (int)str_replace('client_', '', $groupKey);
                 if ($uId > 0) {
+                    $upData = [
+                        'custom_due_amount' => $amount,
+                        'custom_due_note'   => $note,
+                        'paid_status'       => $status,
+                        'updated_at'        => $now,
+                    ];
+                    if ($paidDate !== null) {
+                        $upData['last_paid_date'] = $paidDate;
+                    }
                     Capsule::table('mod_csm_monitored_clients')->updateOrInsert(
                         ['userid' => $uId],
-                        [
-                            'custom_due_amount' => $amount,
-                            'custom_due_note'   => $note,
-                            'paid_status'       => ($amount > 0 ? 'unpaid' : 'paid'),
-                            'updated_at'        => $now
-                        ]
+                        $upData
                     );
                     echo json_encode(['success' => true]);
                     exit;
@@ -3841,12 +3897,16 @@ if (!function_exists('client_services_monitor_output')) {
             } elseif (strpos($groupKey, 'offline_') === 0) {
                 $cId = (int)str_replace('offline_', '', $groupKey);
                 if ($cId > 0) {
-                    Capsule::table('mod_csm_custom_customers')->where('id', $cId)->update([
+                    $upData = [
                         'amount'          => $amount,
                         'custom_due_note' => $note,
-                        'status'          => ($amount > 0 ? 'Unpaid' : 'Paid'),
-                        'updated_at'      => $now
-                    ]);
+                        'status'          => ($status === 'paid' ? 'Paid' : 'Active'),
+                        'updated_at'      => $now,
+                    ];
+                    if ($paidDate !== null) {
+                        $upData['last_paid_date'] = $paidDate;
+                    }
+                    Capsule::table('mod_csm_custom_customers')->where('id', $cId)->update($upData);
                     echo json_encode(['success' => true]);
                     exit;
                 }

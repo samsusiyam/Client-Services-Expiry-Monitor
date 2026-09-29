@@ -251,17 +251,32 @@ if (class_exists('\WHMCS\Module\AbstractWidget')) {
                     ];
                 }
 
-                // Sort: Unpaid dues first, then oldest paid date
+                // Sort Corporate Customers:
+                // 1. Unpaid Clients (due > 0 or paid_status != 'paid') at the Top
+                //    - Within Unpaid: Earliest Bill Pay Date (Overdue / Today / Upcoming, then non-set dates) first, then Due Amount DESC
+                // 2. Paid Clients at the Bottom
+                //    - Within Paid: Most recent paid date DESC
                 uasort($list, function ($a, $b) {
-                    $isUnpaidA = ($a['due_amount'] > 0 || $a['paid_status'] !== 'paid') ? 1 : 0;
-                    $isUnpaidB = ($b['due_amount'] > 0 || $b['paid_status'] !== 'paid') ? 1 : 0;
+                    $isUnpaidA = ((float)$a['due_amount'] > 0 || strtolower($a['paid_status'] ?? '') !== 'paid') ? 1 : 0;
+                    $isUnpaidB = ((float)$b['due_amount'] > 0 || strtolower($b['paid_status'] ?? '') !== 'paid') ? 1 : 0;
                     if ($isUnpaidA !== $isUnpaidB) {
                         return $isUnpaidB - $isUnpaidA;
                     }
-                    $dA = !empty($a['last_paid']) ? $a['last_paid'] : '0000-00-00';
-                    $dB = !empty($b['last_paid']) ? $b['last_paid'] : '0000-00-00';
-                    if ($dA !== $dB) {
-                        return strcmp($dA, $dB);
+                    if ($isUnpaidA === 1) {
+                        $dA = (!empty($a['last_paid']) && $a['last_paid'] !== '0000-00-00') ? $a['last_paid'] : '9999-99-99';
+                        $dB = (!empty($b['last_paid']) && $b['last_paid'] !== '0000-00-00') ? $b['last_paid'] : '9999-99-99';
+                        if ($dA !== $dB) {
+                            return strcmp($dA, $dB);
+                        }
+                        if ((float)$a['due_amount'] !== (float)$b['due_amount']) {
+                            return ((float)$b['due_amount'] > (float)$a['due_amount']) ? 1 : -1;
+                        }
+                    } else {
+                        $dA = (!empty($a['last_paid']) && $a['last_paid'] !== '0000-00-00') ? $a['last_paid'] : '0000-00-00';
+                        $dB = (!empty($b['last_paid']) && $b['last_paid'] !== '0000-00-00') ? $b['last_paid'] : '0000-00-00';
+                        if ($dA !== $dB) {
+                            return strcmp($dB, $dA);
+                        }
                     }
                     return strcmp($a['name'], $b['name']);
                 });
@@ -323,7 +338,7 @@ if (class_exists('\WHMCS\Module\AbstractWidget')) {
                                 <th style="padding:10px 12px;">Contact</th>
                                 <th style="padding:10px 12px;" class="text-center">Products</th>
                                 <th style="padding:10px 12px;">Custom Due Note</th>
-                                <th style="padding:10px 12px;">Bill Paid Date</th>
+                                <th style="padding:10px 12px;">Bill Pay Date</th>
                                 <th style="padding:10px 14px;" class="text-center">Action</th>
                             </tr>
                         </thead>
@@ -353,6 +368,7 @@ if (class_exists('\WHMCS\Module\AbstractWidget')) {
                     $waLink = !empty($digitsPhone) ? '<a href="https://wa.me/' . $digitsPhone . '" target="_blank" class="btn btn-default btn-xs" style="color:#16a34a;padding:1px 5px;" title="WhatsApp"><i class="fab fa-whatsapp"></i></a>' : '';
 
                     // Due
+                    $isUnpaid = ((float)$cl['due_amount'] > 0 || strtolower($cl['paid_status'] ?? '') !== 'paid');
                     $dueHtml = '';
                     if ($cl['due_amount'] > 0) {
                         $dueHtml = '<strong style="color:#dc2626;font-size:13px;"><i class="fas fa-circle-exclamation"></i> ' . $pfx . number_format($cl['due_amount'], 2) . $sfx . '</strong>';
@@ -361,14 +377,25 @@ if (class_exists('\WHMCS\Module\AbstractWidget')) {
                     }
                     $dueNoteHtml = !empty($cl['due_note']) ? '<div style="color:#64748b;font-size:11px;max-width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="' . htmlspecialchars($cl['due_note'], ENT_QUOTES, 'UTF-8') . '"><i class="fas fa-note-sticky text-info"></i> ' . htmlspecialchars($cl['due_note'], ENT_QUOTES, 'UTF-8') . '</div>' : '';
 
-                    // Last Paid Date
+                    // Bill Pay Date
                     $paidDateHtml = '';
                     if (!empty($cl['last_paid']) && $cl['last_paid'] !== '0000-00-00') {
                         $pTs = strtotime($cl['last_paid']);
-                        $diff = (int)round(($todayTs - $pTs) / 86400);
-                        $paidDateHtml = '<strong>' . date('d/m/Y', $pTs) . '</strong>' . ($diff === 0 ? ' <span class="label label-warning" style="font-size:9px;">Today</span>' : ' <span class="label label-success" style="font-size:9px;">' . $diff . 'd ago</span>');
+                        $diff = (int)round(($pTs - $todayTs) / 86400);
+                        $dateFmt = date('d/m/Y', $pTs);
+                        if (!$isUnpaid) {
+                            $paidDateHtml = '<strong style="color:#16a34a;">' . $dateFmt . '</strong> <span class="label label-success" style="font-size:9px;">Paid</span>';
+                        } else {
+                            if ($diff < 0) {
+                                $paidDateHtml = '<strong style="color:#dc2626;">' . $dateFmt . '</strong> <span class="label label-danger" style="font-size:9px;">Overdue ' . abs($diff) . 'd</span>';
+                            } elseif ($diff === 0) {
+                                $paidDateHtml = '<strong style="color:#d97706;">' . $dateFmt . '</strong> <span class="label label-warning" style="font-size:9px;">Today</span>';
+                            } else {
+                                $paidDateHtml = '<strong style="color:#0f5ea8;">' . $dateFmt . '</strong> <span class="label label-info" style="font-size:9px;">In ' . $diff . 'd</span>';
+                            }
+                        }
                     } else {
-                        $paidDateHtml = '<span class="text-muted" style="font-size:11px;">Not Recorded</span>';
+                        $paidDateHtml = '<span class="text-muted" style="font-size:11px;">Not Set</span>';
                     }
 
                     $out .= '<tr style="border-bottom:1px solid #f1f5f9;">
